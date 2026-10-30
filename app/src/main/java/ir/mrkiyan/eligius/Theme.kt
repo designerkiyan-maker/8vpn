@@ -24,33 +24,33 @@ class Extra(val a: Color, val b: Color, val busy: Color) {
     val gradient: Brush get() = Brush.linearGradient(listOf(a, b))
 }
 
-val LocalExtra = staticCompositionLocalOf { Extra(Color(0xFF3DDBC4), Color(0xFF7C8CFF), Color(0xFFFFB84D)) }
+val LocalExtra = staticCompositionLocalOf { Extra(Color(0xFF7E6BFF), Color(0xFFB07CFF), Color(0xFFE385FF)) }
 
 private val Dark = darkColorScheme(
-    primary = Color(0xFF8D9BFF), onPrimary = Color(0xFF0B1240),
-    primaryContainer = Color(0xFF2A3487), onPrimaryContainer = Color(0xFFDDE1FF),
-    secondary = Color(0xFF3DDBC4), onSecondary = Color(0xFF00382F),
-    tertiary = Color(0xFFFFB84D), onTertiary = Color(0xFF3B2800),
-    background = Color(0xFF0A0E1A), onBackground = Color(0xFFE8EAF6),
-    surface = Color(0xFF0A0E1A), onSurface = Color(0xFFE8EAF6),
-    surfaceVariant = Color(0xFF222B42), onSurfaceVariant = Color(0xFFA9B1CC),
-    surfaceContainer = Color(0xFF131A2B), surfaceContainerHigh = Color(0xFF1B2438),
-    surfaceContainerHighest = Color(0xFF232E47),
-    outline = Color(0xFF55607F), outlineVariant = Color(0xFF263050),
+    primary = Color(0xFFB07CFF), onPrimary = Color(0xFF270A52),
+    primaryContainer = Color(0xFF3F1D7E), onPrimaryContainer = Color(0xFFEBDCFF),
+    secondary = Color(0xFF7E6BFF), onSecondary = Color(0xFF17114F),
+    tertiary = Color(0xFFE385FF), onTertiary = Color(0xFF3C0A54),
+    background = Color(0xFF0D0A1A), onBackground = Color(0xFFE9E4F7),
+    surface = Color(0xFF0D0A1A), onSurface = Color(0xFFE9E4F7),
+    surfaceVariant = Color(0xFF271D42), onSurfaceVariant = Color(0xFFB2A6CE),
+    surfaceContainer = Color(0xFF171130), surfaceContainerHigh = Color(0xFF1F1840),
+    surfaceContainerHighest = Color(0xFF2A2052),
+    outline = Color(0xFF6C5F93), outlineVariant = Color(0xFF352A58),
     error = Color(0xFFFF8A8A),
 )
 
 private val Light = lightColorScheme(
-    primary = Color(0xFF4F5BD5), onPrimary = Color.White,
-    primaryContainer = Color(0xFFE0E3FF), onPrimaryContainer = Color(0xFF0B1470),
-    secondary = Color(0xFF0FA58F), onSecondary = Color.White,
-    tertiary = Color(0xFFD98200), onTertiary = Color.White,
-    background = Color(0xFFF4F6FC), onBackground = Color(0xFF151A2C),
-    surface = Color(0xFFF4F6FC), onSurface = Color(0xFF151A2C),
-    surfaceVariant = Color(0xFFE4E8F5), onSurfaceVariant = Color(0xFF586080),
-    surfaceContainer = Color(0xFFFFFFFF), surfaceContainerHigh = Color(0xFFEEF1FA),
-    surfaceContainerHighest = Color(0xFFE6EAF7),
-    outline = Color(0xFF8B93B0), outlineVariant = Color(0xFFDDE2F0),
+    primary = Color(0xFF6C3AD9), onPrimary = Color.White,
+    primaryContainer = Color(0xFFEADCFF), onPrimaryContainer = Color(0xFF2A0763),
+    secondary = Color(0xFF5A49C9), onSecondary = Color.White,
+    tertiary = Color(0xFFA030B5), onTertiary = Color.White,
+    background = Color(0xFFF7F4FC), onBackground = Color(0xFF1C1330),
+    surface = Color(0xFFF7F4FC), onSurface = Color(0xFF1C1330),
+    surfaceVariant = Color(0xFFE8E0F6), onSurfaceVariant = Color(0xFF4C4364),
+    surfaceContainer = Color(0xFFFFFFFF), surfaceContainerHigh = Color(0xFFF2EDFB),
+    surfaceContainerHighest = Color(0xFFECE5F9),
+    outline = Color(0xFF7D749B), outlineVariant = Color(0xFFDED4F1),
     error = Color(0xFFD93A3A),
 )
 
