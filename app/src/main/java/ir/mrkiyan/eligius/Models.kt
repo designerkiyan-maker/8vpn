@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.content.Context
 import android.content.SharedPreferences

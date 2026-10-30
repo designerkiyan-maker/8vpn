@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import java.io.InputStream
 import java.net.InetSocketAddress

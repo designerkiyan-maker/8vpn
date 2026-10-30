@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size

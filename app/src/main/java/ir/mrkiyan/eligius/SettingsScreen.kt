@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.os.Build
 import android.widget.Toast

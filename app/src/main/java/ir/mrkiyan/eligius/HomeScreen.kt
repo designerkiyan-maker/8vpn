@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.app.Activity
 import android.net.VpnService

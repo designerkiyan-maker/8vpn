@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -74,7 +74,7 @@ fun LogsScreen(back: () -> Unit) {
     Page(stringResource(R.string.logs), back, actions = {
         IconBtn(Ico.COPY, {
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("8vpn-log", text))
+            cm.setPrimaryClip(ClipData.newPlainText("eligius-log", text))
             Toast.makeText(ctx, R.string.copied, Toast.LENGTH_SHORT).show()
         })
         IconBtn(Ico.SHARE, {

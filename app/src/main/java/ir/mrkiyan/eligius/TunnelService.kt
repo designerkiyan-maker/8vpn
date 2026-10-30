@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -811,7 +811,7 @@ class TunnelService : VpnService() {
     private fun acquireWake(s: Settings) {
         if (!s.keepAwake) return
         val pm = getSystemService(PowerManager::class.java)
-        wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "8vpn:core").apply {
+        wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "eligius:core").apply {
             setReferenceCounted(false)
             acquire()
         }
@@ -819,7 +819,7 @@ class TunnelService : VpnService() {
         runCatching {
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
-            wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "8vpn:wifi").apply {
+            wifi = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "eligius:wifi").apply {
                 setReferenceCounted(false)
                 acquire()
             }
@@ -866,10 +866,10 @@ class TunnelService : VpnService() {
     companion object {
         private const val CHANNEL = "vpn"
         private const val NOTIF_ID = 8
-        const val ACTION_STOP = "app.vpn8.STOP"
-        const val ACTION_RESCAN = "app.vpn8.RESCAN"
-        const val ACTION_PAUSE = "app.vpn8.PAUSE"
-        const val ACTION_RESUME = "app.vpn8.RESUME"
+        const val ACTION_STOP = "ir.mrkiyan.eligius.STOP"
+        const val ACTION_RESCAN = "ir.mrkiyan.eligius.RESCAN"
+        const val ACTION_PAUSE = "ir.mrkiyan.eligius.PAUSE"
+        const val ACTION_RESUME = "ir.mrkiyan.eligius.RESUME"
         private const val SLOW_BPS = 150_000L // below ~150 KB/s the link is treated as unusable
 
         fun pause(ctx: Context) {

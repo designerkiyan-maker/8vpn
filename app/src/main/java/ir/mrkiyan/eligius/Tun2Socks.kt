@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 /** JNI binding to libt2s-jni.so (xjasonlyu/tun2socks, Go + gVisor netstack). */
 object Tun2Socks {

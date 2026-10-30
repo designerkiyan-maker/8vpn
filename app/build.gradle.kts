@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "app.vpn8"
+    namespace = "ir.mrkiyan.eligius"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.vpn8"
+        applicationId = "ir.mrkiyan.eligius"
         minSdk = 26
         targetSdk = 35
-        versionCode = 59
-        versionName = "5.8"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     val ksPath = System.getenv("KEYSTORE_FILE")

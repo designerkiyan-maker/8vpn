@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import java.net.Inet4Address
 import java.net.NetworkInterface

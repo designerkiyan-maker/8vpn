@@ -1,4 +1,4 @@
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import android.content.BroadcastReceiver
 import android.content.Context

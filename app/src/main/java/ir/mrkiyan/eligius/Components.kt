@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
-package app.vpn8
+package ir.mrkiyan.eligius
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
