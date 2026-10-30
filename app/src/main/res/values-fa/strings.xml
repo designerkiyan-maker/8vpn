@@ -123,10 +123,8 @@
     <string name="app_version">نسخه برنامه</string>
     <string name="core_version">نسخه هسته Aether</string>
     <string name="tunnel_version">نسخه hev-socks5-tunnel</string>
-    <string name="github">گیت‌هاب</string>
-    <string name="telegram">کانال تلگرام</string>
     <string name="license_title">لایسنس و اعتبارها</string>
-    <string name="license_text">برنامه 8 VPN نرم‌افزار آزاد و تحت لایسنس GNU AGPL-3.0 است.\n\nبر پایه Aether از CluvexStudio (AGPL-3.0)، hev-socks5-tunnel از heiher (MIT)، هسته Psiphon و ترنسپورت Lyrebird ساخته شده است. از همه‌ی این پروژه‌ها سپاسگزاریم.</string>
+    <string name="license_text">برنامه Eligius نرم‌افزار آزاد و تحت لایسنس GNU AGPL-3.0 است.\n\nبر پایه Aether از CluvexStudio (AGPL-3.0)، hev-socks5-tunnel از heiher (MIT)، هسته Psiphon و ترنسپورت Lyrebird ساخته شده است. از همه‌ی این پروژه‌ها سپاسگزاریم.</string>
 
     <string name="notif_channel">وضعیت VPN</string>
     <string name="endpoint">اندپوینت سفارشی</string>

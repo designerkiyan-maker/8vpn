@@ -62,8 +62,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-const val GITHUB_URL = "https://github.com/Mrmmd2004/8vpn"
-const val TELEGRAM_URL = "https://t.me/Clubapp8"
+// External links (GitHub, Telegram) are intentionally not shown yet: no official Eligius
+// repository or channels exist at this point, and old 8 VPN links must not leak into the UI.
 
 @Composable
 fun LogsScreen(back: () -> Unit) {
@@ -145,26 +145,26 @@ fun AboutScreen(back: () -> Unit) {
                     InfoRow(stringResource(R.string.tunnel_version), "2.19.0")
                 }
             }
-            UpdateRow(upd) {
-                if (upd != UpdateState.Checking) {
-                    upd = UpdateState.Checking
-                    scope.launch {
-                        upd = Updater.check().fold(
-                            onSuccess = { if (it.newer) UpdateState.Available(it) else UpdateState.UpToDate },
-                            onFailure = { UpdateState.Failed }
-                        )
+            if (Updater.ENABLED) {
+                UpdateRow(upd) {
+                    if (upd != UpdateState.Checking) {
+                        upd = UpdateState.Checking
+                        scope.launch {
+                            upd = Updater.check().fold(
+                                onSuccess = { if (it.newer) UpdateState.Available(it) else UpdateState.UpToDate },
+                                onFailure = { UpdateState.Failed }
+                            )
+                        }
                     }
                 }
+                (upd as? UpdateState.Available)?.let { st ->
+                    Button(
+                        onClick = { uri.openUri(st.info.url) },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) { Text(stringResource(R.string.update_open_github), fontWeight = FontWeight.SemiBold) }
+                }
             }
-            (upd as? UpdateState.Available)?.let { st ->
-                Button(
-                    onClick = { uri.openUri(st.info.url) },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) { Text(stringResource(R.string.update_open_github), fontWeight = FontWeight.SemiBold) }
-            }
-            LinkRow(Ico.CODE, stringResource(R.string.github), "Mrmmd2004/8vpn") { uri.openUri(GITHUB_URL) }
-            LinkRow(Ico.SEND, stringResource(R.string.telegram), "@Clubapp8") { uri.openUri(TELEGRAM_URL) }
             AppCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(stringResource(R.string.license_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.primary)

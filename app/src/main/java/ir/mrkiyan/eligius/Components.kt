@@ -156,7 +156,7 @@ fun LogoMark(sz: Dp) {
     Box(
         Modifier.size(sz).clip(RoundedCornerShape(sz * 0.3f)).background(LocalExtra.current.gradient),
         contentAlignment = Alignment.Center
-    ) { Text("8", fontSize = (sz.value * 0.56f).sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
+    ) { Text("E", fontSize = (sz.value * 0.56f).sp, fontWeight = FontWeight.ExtraBold, color = Color.White) }
 }
 
 @Composable

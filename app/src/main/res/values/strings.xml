@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">8 VPN</string>
+    <string name="app_name" translatable="false">Eligius</string>
     <string name="core_aether" translatable="false">Aether</string>
     <string name="core_psiphon" translatable="false">Psiphon only</string>
     <string name="core_tor" translatable="false">Tor only</string>
@@ -128,10 +128,8 @@
     <string name="app_version">App version</string>
     <string name="core_version">Aether core version</string>
     <string name="tunnel_version">hev-socks5-tunnel version</string>
-    <string name="github">GitHub</string>
-    <string name="telegram">Telegram channel</string>
     <string name="license_title">License and credits</string>
-    <string name="license_text">8 VPN is free software released under the GNU AGPL-3.0.\n\nIt is built on Aether by CluvexStudio (AGPL-3.0), hev-socks5-tunnel by heiher (MIT), Psiphon tunnel core and the Tor pluggable transport Lyrebird. Thank you to all of these projects.</string>
+    <string name="license_text">Eligius is free software released under the GNU AGPL-3.0.\n\nIt is built on Aether by CluvexStudio (AGPL-3.0), hev-socks5-tunnel by heiher (MIT), Psiphon tunnel core and the Tor pluggable transport Lyrebird. Thank you to all of these projects.</string>
 
     <string name="notif_channel">VPN status</string>
     <string name="endpoint">Custom endpoint</string>

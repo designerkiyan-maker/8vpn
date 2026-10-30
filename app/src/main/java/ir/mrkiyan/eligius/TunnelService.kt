@@ -522,7 +522,7 @@ class TunnelService : VpnService() {
 
     private fun bringUpTun(s: Settings, port: Int): Boolean {
         val b = Builder()
-            .setSession("8 VPN")
+            .setSession("Eligius")
             .setMtu(s.mtu())
             .addAddress("198.18.0.1", 32)
             .addRoute("0.0.0.0", 0)
