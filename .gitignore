@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+
+# Kotlin
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local SDK configuration (machine-specific)
+local.properties
+
+# CI-produced artifacts, built by .github/workflows/main.yml (never commit)
+app/libs/
+app/src/main/jniLibs/

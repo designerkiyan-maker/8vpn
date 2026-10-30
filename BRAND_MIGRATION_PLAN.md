@@ -160,13 +160,13 @@ at all densities and in the adaptive-icon mask; README images resolve.
 pause/resume; split tunneling include/exclude; LAN share addresses; Persian locale switching;
 start-on-boot; logs copy/share.
 
-## 5. Decisions required from the product owner
+## 5. Decisions required from the product owner — RESOLVED 2026-10-31
 
-| ID | Decision | Options |
+| ID | Decision | Resolution |
 |---|---|---|
-| D1 | New `applicationId`/namespace | `app.eligius`, `com.eligius.vpn`, `io.eligius.vpn`, … |
-| D2 | Release/update repository | keep `designerkiyan-maker/8vpn`, or a new `…/eligius` repo |
-| D3 | Telegram channel | keep `@Clubapp8` or a new Eligius channel |
-| D4 | Version scheme | continue `5.9`, or restart at `1.0.0` for Eligius |
-| D5 | Fate of `8vpn-fix5/` and `backup-old-ui/` | archive (delete, recoverable from git) vs keep |
-| D6 | Interim logo glyph in-app | text "E" in `LogoMark` until designed assets are supplied |
+| D1 | New `applicationId`/namespace | `ir.mrkiyan.eligius` |
+| D2 | Release/update repository | keep this repo and its remote for now; update check disabled with no endpoint configured until official Eligius release infrastructure exists (no invented URLs) |
+| D3 | Telegram channel | old `@Clubapp8` references removed; no replacement links until official Eligius channels exist |
+| D4 | Version scheme | fresh start: `versionName 1.0.0`, `versionCode 1` |
+| D5 | Fate of `8vpn-fix5/` and `backup-old-ui/` | keep both directories unchanged for now (contents documented in PROJECT_BASELINE.md) |
+| D6 | Interim logo glyph in-app | text "E" in `LogoMark` until the designed Eligius logo and icon assets are supplied |

@@ -222,7 +222,7 @@ jobs:
             echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           else
-            echo "::error::KEYSTORE_BASE64 secret is missing. Refusing to build with a random debug key, because APKs signed that way cannot update an installed 8 VPN (App not installed). Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD in Settings > Secrets and variables > Actions."
+            echo "::error::KEYSTORE_BASE64 secret is missing. Refusing to build with a random debug key, because APKs signed that way cannot update an installed Eligius (App not installed). Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD in Settings > Secrets and variables > Actions."
             exit 1
           fi
 
@@ -238,14 +238,14 @@ jobs:
           mkdir -p out
           cd app/build/outputs/apk/release
           ls -l
-          cp *armeabi-v7a*.apk ../../../../../out/8VPN-armeabi-v7a.apk
-          cp *arm64-v8a*.apk   ../../../../../out/8VPN-arm64-v8a.apk
-          cp *universal*.apk   ../../../../../out/8VPN-universal.apk
+          cp *armeabi-v7a*.apk ../../../../../out/Eligius-armeabi-v7a.apk
+          cp *arm64-v8a*.apk   ../../../../../out/Eligius-arm64-v8a.apk
+          cp *universal*.apk   ../../../../../out/Eligius-universal.apk
           ls -l ../../../../../out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 8VPN-apks
+          name: Eligius-apks
           path: out/*.apk
           if-no-files-found: error
 
