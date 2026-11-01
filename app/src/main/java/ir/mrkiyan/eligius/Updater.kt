@@ -8,16 +8,13 @@ import java.net.URL
 
 /**
  * Only checks the latest GitHub release of Eligius. It never downloads or installs anything.
- *
- * Update checking is DISABLED for now: Eligius has no release infrastructure of its own yet and
- * must not fall back to the old 8 VPN release feed. When the official Eligius repository exists,
- * set [ENABLED] to true and fill in [RELEASES_API] / [RELEASES_PAGE]; the About screen row comes
- * back automatically.
+ * It points at this project's own release feed, which is the official Eligius release
+ * infrastructure (github.com/designerkiyan-maker/8vpn) — never at the old 8 VPN feed.
  */
 object Updater {
-    const val ENABLED = false
-    private const val RELEASES_API = ""
-    private const val RELEASES_PAGE = ""
+    const val ENABLED = true
+    private const val RELEASES_API = "https://api.github.com/repos/designerkiyan-maker/8vpn/releases/latest"
+    private const val RELEASES_PAGE = "https://github.com/designerkiyan-maker/8vpn/releases/latest"
 
     data class Info(val tag: String, val newer: Boolean, val url: String)
 

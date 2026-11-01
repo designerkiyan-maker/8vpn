@@ -689,10 +689,12 @@ class TunnelService : VpnService() {
                 if (tx >= 0 && rx >= 0 && lastTx >= 0 && lastRx >= 0) {
                     Engine.txBps.value = (tx - lastTx).coerceAtLeast(0)
                     Engine.rxBps.value = (rx - lastRx).coerceAtLeast(0)
+                    Engine.pushTraffic(rx - lastRx, tx - lastTx)
                     if (rx > lastRx) lastRxAt = SystemClock.elapsedRealtime()
                 } else {
                     Engine.txBps.value = -1
                     Engine.rxBps.value = -1
+                    Engine.pushTraffic(0, 0)
                 }
                 lastTx = tx
                 lastRx = rx
@@ -727,6 +729,7 @@ class TunnelService : VpnService() {
                     val dRx = (st[3] - lastRx).coerceAtLeast(0)
                     Engine.txBps.value = dTx
                     Engine.rxBps.value = dRx
+                    Engine.pushTraffic(dRx, dTx)
                     if (dRx > 0) {
                         lastRxAt = now
                         stallSince = 0L

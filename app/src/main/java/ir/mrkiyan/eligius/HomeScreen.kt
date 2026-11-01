@@ -59,6 +59,11 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -98,7 +103,6 @@ fun HomeScreen(openSettings: () -> Unit, openLogs: () -> Unit) {
     val exit by Engine.exitInfo.collectAsStateWithLifecycle()
     val exitCc by Engine.exitCountry.collectAsStateWithLifecycle()
     val speed by Engine.speedBps.collectAsStateWithLifecycle()
-    val logs by Engine.logs.collectAsStateWithLifecycle()
 
     val idle = st.phase == Phase.IDLE
     val scope = rememberCoroutineScope()
@@ -214,9 +218,10 @@ fun HomeScreen(openSettings: () -> Unit, openLogs: () -> Unit) {
             )
         }
 
-        // ---- Stats
+        // ---- Stats: live throughput graph on top, numbers below
         Spacer(Modifier.height(18.dp))
         AppCard {
+            ThroughputGraph(live = live && s.vpnMode, paused = paused, modifier = Modifier.padding(8.dp))
             Row(Modifier.padding(horizontal = 6.dp, vertical = 16.dp)) {
                 Stat(Ico.BOLT, stringResource(R.string.ping), ping?.let { stringResource(R.string.ms_fmt, it) } ?: "—", Modifier.weight(1f))
                 Stat(Ico.DOWN, stringResource(R.string.download), if (s.vpnMode && live) fmtRate(rx) else "—", Modifier.weight(1f))
@@ -301,17 +306,79 @@ fun HomeScreen(openSettings: () -> Unit, openLogs: () -> Unit) {
             }
         }
 
-        if (logs.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            AppCard(Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = openLogs)) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    logs.takeLast(2).forEach {
-                        Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = c.onSurfaceVariant)
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Capacity of the home graph window, in one-second samples. */
+private const val TRAFFIC_CAPACITY = 60
+
+/**
+ * Live throughput graph over the last minute: download fills upward from the middle axis,
+ * upload mirrors downward, both scrolling in from the right. Drawn with the theme's own
+ * primary (download) and secondary (upload) colors.
+ */
+@Composable
+private fun ThroughputGraph(live: Boolean, paused: Boolean, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.colorScheme
+    val rxColor = c.primary
+    val txColor = c.secondary
+    val hist by Engine.traffic.collectAsStateWithLifecycle()
+    Box(
+        modifier.fillMaxWidth().height(116.dp)
+            .clip(RoundedCornerShape(18.dp)).background(c.surfaceContainerHigh)
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val mid = h / 2f
+            val edge = 5.dp.toPx()
+            for (i in intArrayOf(1, 3)) {
+                val y = h * i / 4f
+                drawLine(c.outlineVariant.copy(alpha = 0.35f), Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+            }
+            drawLine(c.outline.copy(alpha = 0.5f), Offset(0f, mid), Offset(w, mid), strokeWidth = 1f)
+            val samples = if (live && !paused) hist else emptyList()
+            val n = samples.size
+            if (n >= 2) {
+                val peak = samples.maxOf { maxOf(it.rx, it.tx) }.coerceAtLeast(64L * 1024L).toFloat()
+                val step = w / (TRAFFIC_CAPACITY - 1)
+                fun xAt(i: Int) = w - (n - 1 - i) * step
+                fun yRx(i: Int) = mid - (samples[i].rx / peak) * (mid - edge)
+                fun yTx(i: Int) = mid + (samples[i].tx / peak) * (mid - edge)
+                fun linePath(yOf: (Int) -> Float): Path {
+                    val p = Path()
+                    p.moveTo(xAt(0), yOf(0))
+                    for (i in 1 until n) {
+                        val px = xAt(i - 1); val py = yOf(i - 1); val x = xAt(i); val y = yOf(i)
+                        p.cubicTo((px + x) / 2f, py, (px + x) / 2f, y, x, y)
                     }
+                    return p
                 }
+                fun areaPath(yOf: (Int) -> Float): Path {
+                    val p = linePath(yOf)
+                    p.lineTo(xAt(n - 1), mid)
+                    p.lineTo(xAt(0), mid)
+                    p.close()
+                    return p
+                }
+                drawPath(
+                    areaPath(::yRx),
+                    Brush.verticalGradient(listOf(rxColor.copy(alpha = 0.42f), rxColor.copy(alpha = 0.04f)), startY = 0f, endY = mid)
+                )
+                drawPath(
+                    areaPath(::yTx),
+                    Brush.verticalGradient(listOf(txColor.copy(alpha = 0.05f), txColor.copy(alpha = 0.42f)), startY = mid, endY = h)
+                )
+                drawPath(linePath(::yRx), rxColor, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                drawPath(linePath(::yTx), txColor, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            } else {
+                drawLine(
+                    c.outline.copy(alpha = 0.35f), Offset(w * 0.12f, mid), Offset(w * 0.88f, mid),
+                    strokeWidth = 1.5f, cap = StrokeCap.Round
+                )
             }
         }
-        Spacer(Modifier.height(24.dp))
     }
 }
 
