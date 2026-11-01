@@ -169,4 +169,4 @@ start-on-boot; logs copy/share.
 | D3 | Telegram channel | old `@Clubapp8` references removed; no replacement links until official Eligius channels exist |
 | D4 | Version scheme | fresh start: `versionName 1.0.0`, `versionCode 1` |
 | D5 | Fate of `8vpn-fix5/` and `backup-old-ui/` | keep both directories unchanged for now (contents documented in PROJECT_BASELINE.md) |
-| D6 | Interim logo glyph in-app | text "E" in `LogoMark` until the designed Eligius logo and icon assets are supplied |
+| D6 | Interim logo glyph in-app | interim "E" was used, then the official assets (`Eligius-Icon.png`, `Eligius-Splash.png`) were supplied and integrated 2026-11-01: launcher mipmaps, adaptive layers, system splash (API 31+) + pre-31 window splash, in-app `LogoMark` now renders the real mark |

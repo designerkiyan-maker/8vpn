@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="Eligius-Splash.png" alt="Eligius — Beyond Boundaries." width="55%">
+
 # Eligius VPN
 
 **Beyond Boundaries.**
@@ -10,8 +12,6 @@
 ![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Android%208%2B-3DDC84?logo=android&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?logo=jetpackcompose&logoColor=white)
-
-> Official brand banners and screenshots will be added when the final Eligius assets are ready.
 
 </div>
 
