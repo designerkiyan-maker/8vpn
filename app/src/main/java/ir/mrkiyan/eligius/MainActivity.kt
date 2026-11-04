@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Root(onLanguageChanged: () -> Unit) {
     val ctx = LocalContext.current
-    var screen by rememberSaveable { mutableIntStateOf(HOME) }
+    val auth by AuthStore.flow.collectAsStateWithLifecycle()
+    var screen by rememberSaveable { mutableIntStateOf(if (AuthStore.isLoggedIn) HOME else AUTH) }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
@@ -69,7 +70,18 @@ private fun Root(onLanguageChanged: () -> Unit) {
         ) notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    BackHandler(enabled = screen != HOME) {
+    // Log in / log out drives the gate: jump between the login screen and Home — only then,
+    // and not on recreation, so manual navigation survives a rotation.
+    var lastAuth by remember { mutableStateOf(auth) }
+    LaunchedEffect(auth) {
+        if (auth != lastAuth) {
+            screen = if (auth) HOME else AUTH
+            lastAuth = auth
+        }
+    }
+
+    BackHandler(enabled = screen == AUTH) { }   // the gate: no backing out of the login screen
+    BackHandler(enabled = screen != HOME && screen != AUTH) {
         screen = if (screen == SPLIT || screen == ABOUT) SETTINGS else HOME
     }
 
@@ -94,6 +106,8 @@ private fun Root(onLanguageChanged: () -> Unit) {
                     LOGS -> LogsScreen(back = { screen = HOME })
                     ABOUT -> AboutScreen(back = { screen = SETTINGS })
                     SPLIT -> SplitScreen(back = { screen = SETTINGS })
+                    AUTH -> AuthScreen(onRegister = { screen = AUTH_WEB })
+                    AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
                 }
             }
         }
@@ -105,3 +119,5 @@ private const val SETTINGS = 1
 private const val LOGS = 2
 private const val ABOUT = 3
 private const val SPLIT = 4
+private const val AUTH = 5
+private const val AUTH_WEB = 6

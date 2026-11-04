@@ -133,7 +133,18 @@
 
     <string name="share_title">Share Eligius</string>
     <string name="share_app">Share the app</string>
-    <string name="share_qr_hint">Point another phone\'s camera at this code to download the latest Eligius</string>
+    <string name="share_qr_hint">Point another phone\'s camera at this code — it downloads the right build automatically</string>
+
+    <string name="login_hint">Sign in with your mrkiyan.ir account to unlock the VPN.</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="login_btn">Log in</string>
+    <string name="login_error">Could not sign in. Check your username, password and connection.</string>
+    <string name="no_account">No account yet?</string>
+    <string name="create_account">Create account</string>
+    <string name="register_title">Create your account</string>
+    <string name="logged_in_as">Signed in as %1$s</string>
+    <string name="logout">Log out</string>
 
     <string name="notif_channel">VPN status</string>
     <string name="endpoint">Custom endpoint</string>

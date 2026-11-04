@@ -128,7 +128,18 @@
 
     <string name="share_title">اشتراک‌گذاری الیژیوس</string>
     <string name="share_app">اشتراک‌گذاری برنامه</string>
-    <string name="share_qr_hint">دوربین گوشی دیگر را روی این کد بگیرید تا آخرین نسخه‌ی الیژیوس دانلود شود</string>
+    <string name="share_qr_hint">دوربین گوشی دیگر را روی این کد بگیرید — نسخه‌ی سازگار با گوشی‌اش خودکار دانلود می‌شود</string>
+
+    <string name="login_hint">برای فعال‌سازی VPN با حساب mrkiyan.ir خود وارد شوید.</string>
+    <string name="username">نام کاربری</string>
+    <string name="password">رمز عبور</string>
+    <string name="login_btn">ورود</string>
+    <string name="login_error">ورود ناموفق بود. نام کاربری، رمز و اتصال اینترنت را بررسی کنید.</string>
+    <string name="no_account">حساب کاربری ندارید؟</string>
+    <string name="create_account">ساخت حساب کاربری</string>
+    <string name="register_title">ساخت حساب کاربری</string>
+    <string name="logged_in_as">وارد شده با حساب %1$s</string>
+    <string name="logout">خروج از حساب</string>
 
     <string name="notif_channel">وضعیت VPN</string>
     <string name="endpoint">اندپوینت سفارشی</string>

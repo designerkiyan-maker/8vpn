@@ -31,6 +31,11 @@ class QsTile : TileService() {
 
     @Suppress("DEPRECATION")
     override fun onClick() {
+        // The tile sits behind the login gate too: without a session it just opens the app.
+        if (!AuthStore.isLoggedIn) {
+            startActivityAndCollapse(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
         if (Engine.status.value.phase != Phase.IDLE) {
             TunnelService.stop(this)
             return

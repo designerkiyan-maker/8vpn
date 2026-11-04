@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eligius VPN — Download</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { min-height: 100vh; background: radial-gradient(1200px 600px at 50% -10%, #2a1650 0%, #0d0a1a 55%) #0d0a1a; color: #ece7f8; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { width: 100%; max-width: 420px; background: rgba(255,255,255,0.04); border: 1px solid rgba(176,124,255,0.25); border-radius: 24px; padding: 32px 24px; text-align: center; }
+  .mark { width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 22px; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #7e6bff, #b07cff); box-shadow: 0 0 40px rgba(176,124,255,0.45); }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .tag { color: #b3a8ce; font-size: 12px; margin-bottom: 22px; letter-spacing: 3px; }
+  .status { font-size: 14px; color: #b3a8ce; min-height: 48px; line-height: 1.6; margin-bottom: 14px; }
+  .status b { color: #b07cff; }
+  a.btn { display: block; margin: 10px 0; padding: 13px 16px; border-radius: 14px; text-decoration: none; font-weight: 600; font-size: 14px; color: #ece7f8; background: rgba(255,255,255,0.05); border: 1px solid rgba(176,124,255,0.3); }
+  a.btn.primary { background: linear-gradient(135deg, #7e6bff, #b07cff); color: #fff; border: none; }
+  .fa { direction: rtl; display: inline-block; }
+  .foot { margin-top: 18px; font-size: 11px; color: #6c5f93; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="mark">E</div>
+  <h1>Eligius VPN</h1>
+  <div class="tag">BEYOND BOUNDARIES.</div>
+  <div class="status" id="status">Detecting the right build for your device…<br><span class="fa">در حال تشخیص نسخه‌ی سازگار با گوشی شما…</span></div>
+  <div id="links" style="display:none">
+    <a class="btn primary" id="auto" href="https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk">Download for my device</a>
+    <a class="btn" href="https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-arm64-v8a.apk">arm64-v8a — modern phones</a>
+    <a class="btn" href="https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-armeabi-v7a.apk">armeabi-v7a — older phones</a>
+    <a class="btn" href="https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk">Universal — all devices</a>
+  </div>
+  <div class="foot">Eligius is free software (AGPL-3.0), built on the Aether core.<br>اپلیکیشن رایگان و متن‌باز — بر پایه‌ی هسته‌ی Aether.</div>
+</div>
+<script>
+const BASE = "https://github.com/designerkiyan-maker/8vpn/releases/latest/download/";
+const status = document.getElementById("status");
+const links = document.getElementById("links");
+const auto = document.getElementById("auto");
+
+function pick(asset, label) {
+  auto.href = BASE + "Eligius-" + asset + ".apk";
+  auto.textContent = "Download for my device (" + label + ")";
+  status.innerHTML = "Detected <b>" + label + "</b> — your download is starting…<br>" +
+    "<span class='fa'>نسخه‌ی <b>" + label + "</b> تشخیص داده شد؛ دانلود آغاز می‌شود…</span>";
+  links.style.display = "block";
+  location.replace(BASE + "Eligius-" + asset + ".apk");
+}
+
+function showAll(msg) {
+  status.innerHTML = msg;
+  links.style.display = "block";
+}
+
+(async function () {
+  // Non-Android visitors (desktop, tablets of other OSes): just show every option.
+  if (!/android/i.test(navigator.userAgent)) {
+    showAll("Pick the build for your device:<br><span class='fa'>نسخه‌ی مناسب دستگاه خود را انتخاب کنید:</span>");
+    return;
+  }
+  try {
+    // Modern Chromium exposes the real CPU architecture on request.
+    if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValue) {
+      const hd = await navigator.userAgentData.getHighEntropyValue(["architecture", "bitness"]);
+      const arch = (hd.architecture || "").toLowerCase();
+      const bits = hd.bitness || "";
+      if (arch === "arm" && bits === "64") return pick("arm64-v8a", "arm64-v8a");
+      if (arch === "arm" && bits === "32") return pick("armeabi-v7a", "armeabi-v7a");
+    }
+    // Legacy fallback: the platform string on older Android browsers.
+    const plat = navigator.platform || "";
+    if (/aarch64|armv8/i.test(plat)) return pick("arm64-v8a", "arm64-v8a");
+    if (/armv7|armv6/i.test(plat)) return pick("armeabi-v7a", "armeabi-v7a");
+  } catch (e) { /* fall through to the safe default */ }
+  // Unknown → the universal APK runs on every Android device.
+  showAll("Couldn't detect the architecture — the <b>Universal</b> build works on every device.<br>" +
+    "<span class='fa'>تشخیص خودکار ممکن نشد؛ نسخه‌ی <b>Universal</b> روی همه‌ی گوشی‌ها کار می‌کند.</span>");
+  location.replace(BASE + "Eligius-universal.apk");
+})();
+</script>
+</body>
+</html>

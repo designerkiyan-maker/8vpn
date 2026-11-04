@@ -11,6 +11,7 @@ class BootReceiver : BroadcastReceiver() {
         SettingsStore.init(context)
         val s = SettingsStore.current
         if (!s.autoStart) return
+        if (!AuthStore.isLoggedIn) return // login gate: no session, no tunnel
         if (s.vpnMode && VpnService.prepare(context) != null) return // permission not granted yet
         TunnelService.start(context)
     }

@@ -37,6 +37,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -68,6 +69,9 @@ import kotlinx.coroutines.withContext
 /** Newest-release direct download: GitHub serves the newest release's asset at this fixed URL. */
 const val DOWNLOAD_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk"
 const val RELEASES_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest"
+
+/** Device-aware download page (GitHub Pages): detects the phone's ABI and serves the matching APK. */
+const val PAGES_URL = "https://designerkiyan-maker.github.io/8vpn/"
 
 @Composable
 fun LogsScreen(back: () -> Unit) {
@@ -149,6 +153,21 @@ fun AboutScreen(back: () -> Unit) {
                     InfoRow(stringResource(R.string.tunnel_version), "2.19.0")
                 }
             }
+            AuthStore.flow.collectAsStateWithLifecycle().value?.let { s ->
+                AppCard {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon8(Ico.INFO, c.primary, 22.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            stringResource(R.string.logged_in_as, s.user),
+                            Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(onClick = { AuthStore.logout() }) {
+                            Text(stringResource(R.string.logout), color = c.error, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
             if (Updater.ENABLED) {
                 UpdateRow(upd) {
                     if (upd != UpdateState.Checking) {
@@ -221,7 +240,7 @@ private fun ShareQrCard() {
                 onClick = {
                     val i = Intent(Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(Intent.EXTRA_TITLE, "Eligius VPN")
-                        .putExtra(Intent.EXTRA_TEXT, "Eligius VPN — Beyond Boundaries.\n$RELEASES_URL")
+                        .putExtra(Intent.EXTRA_TEXT, "Eligius VPN — Beyond Boundaries.\n$PAGES_URL")
                     ctx.startActivity(Intent.createChooser(i, null))
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
