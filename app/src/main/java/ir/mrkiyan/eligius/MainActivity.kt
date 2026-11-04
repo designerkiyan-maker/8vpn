@@ -77,7 +77,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
     var lastAuth by remember { mutableStateOf(auth) }
     LaunchedEffect(auth) {
         if (auth != lastAuth) {
-            screen = if (auth) HOME else AUTH
+            screen = if (auth != null) HOME else AUTH
             lastAuth = auth
         }
     }
