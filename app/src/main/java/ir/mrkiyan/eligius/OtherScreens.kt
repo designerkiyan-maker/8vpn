@@ -8,7 +8,10 @@ import android.widget.Toast
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.runtime.produceState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,8 +65,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// External links (GitHub, Telegram) are intentionally not shown yet: no official Eligius
-// repository or channels exist at this point, and old 8 VPN links must not leak into the UI.
+/** Newest-release direct download: GitHub serves the newest release's asset at this fixed URL. */
+const val DOWNLOAD_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk"
+const val RELEASES_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest"
 
 @Composable
 fun LogsScreen(back: () -> Unit) {
@@ -165,6 +169,7 @@ fun AboutScreen(back: () -> Unit) {
                     ) { Text(stringResource(R.string.update_open_github), fontWeight = FontWeight.SemiBold) }
                 }
             }
+            ShareQrCard()
             AppCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(stringResource(R.string.license_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.primary)
@@ -173,6 +178,55 @@ fun AboutScreen(back: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/** Share card: the always-newest GitHub download link as a QR code, plus the system share sheet. */
+@Composable
+private fun ShareQrCard() {
+    val ctx = LocalContext.current
+    val c = MaterialTheme.colorScheme
+    AppCard {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                stringResource(R.string.share_title), style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold, color = c.primary
+            )
+            // A QR only scans reliably with strong contrast, so it renders dark-on-white in every theme.
+            Box(Modifier.clip(RoundedCornerShape(16.dp)).background(Color.White).padding(8.dp)) {
+                Canvas(Modifier.size(176.dp)) {
+                    val cell = size.width / QR_SIZE
+                    for (r in 0 until QR_SIZE) for (col in 0 until QR_SIZE) {
+                        if (QR_MODULES[r * QR_SIZE + col] == '1') {
+                            drawRect(
+                                Color.Black,
+                                topLeft = Offset(col * cell, r * cell),
+                                // slight overlap so adjacent modules never leave a hairline gap
+                                size = Size(cell + 0.6f, cell + 0.6f)
+                            )
+                        }
+                    }
+                }
+            }
+            Text(
+                stringResource(R.string.share_qr_hint), style = MaterialTheme.typography.bodySmall,
+                color = c.onSurfaceVariant, textAlign = TextAlign.Center
+            )
+            Button(
+                onClick = {
+                    val i = Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_TITLE, "Eligius VPN")
+                        .putExtra(Intent.EXTRA_TEXT, "Eligius VPN — Beyond Boundaries.\n$RELEASES_URL")
+                    ctx.startActivity(Intent.createChooser(i, null))
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) { Text(stringResource(R.string.share_app), fontWeight = FontWeight.SemiBold) }
         }
     }
 }

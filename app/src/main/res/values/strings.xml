@@ -131,6 +131,10 @@
     <string name="license_title">License and credits</string>
     <string name="license_text">Eligius is free software released under the GNU AGPL-3.0.\n\nIt is built on Aether by CluvexStudio (AGPL-3.0), hev-socks5-tunnel by heiher (MIT), Psiphon tunnel core and the Tor pluggable transport Lyrebird. Thank you to all of these projects.</string>
 
+    <string name="share_title">Share Eligius</string>
+    <string name="share_app">Share the app</string>
+    <string name="share_qr_hint">Point another phone\'s camera at this code to download the latest Eligius</string>
+
     <string name="notif_channel">VPN status</string>
     <string name="endpoint">Custom endpoint</string>
     <string name="endpoint_outer">Custom endpoint (outer hop)</string>
