@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,7 +52,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -65,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** Newest-release direct download: GitHub serves the newest release's asset at this fixed URL. */
 const val DOWNLOAD_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk"
@@ -130,7 +131,6 @@ private fun LogLine(line: String) {
 
 @Composable
 fun AboutScreen(back: () -> Unit) {
-    val uri = LocalUriHandler.current
     val ctx = LocalContext.current
     val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -169,24 +169,34 @@ fun AboutScreen(back: () -> Unit) {
                 }
             }
             if (Updater.ENABLED) {
-                UpdateRow(upd) {
-                    if (upd != UpdateState.Checking) {
-                        upd = UpdateState.Checking
-                        scope.launch {
-                            upd = Updater.check().fold(
-                                onSuccess = { if (it.newer) UpdateState.Available(it) else UpdateState.UpToDate },
-                                onFailure = { UpdateState.Failed }
-                            )
-                        }
+                fun startUpdate(info: Updater.Info) {
+                    scope.launch {
+                        upd = UpdateState.Downloading(0)
+                        val file = File(ctx.cacheDir, "updates/eligius-update.apk")
+                        Updater.download(Updater.apkUrl(info.tag), file) { pct -> upd = UpdateState.Downloading(pct) }.fold(
+                            onSuccess = {
+                                upd = UpdateState.Idle
+                                if (!Updater.launchInstall(ctx, file)) upd = UpdateState.DownloadFailed
+                            },
+                            onFailure = { upd = UpdateState.DownloadFailed }
+                        )
                     }
                 }
-                (upd as? UpdateState.Available)?.let { st ->
-                    Button(
-                        onClick = { uri.openUri(st.info.url) },
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
-                        shape = RoundedCornerShape(16.dp)
-                    ) { Text(stringResource(R.string.update_open_github), fontWeight = FontWeight.SemiBold) }
-                }
+                UpdateRow(
+                    st = upd,
+                    onCheck = {
+                        if (upd != UpdateState.Checking) {
+                            upd = UpdateState.Checking
+                            scope.launch {
+                                upd = Updater.check().fold(
+                                    onSuccess = { if (it.newer) UpdateState.Available(it) else UpdateState.UpToDate },
+                                    onFailure = { UpdateState.Failed }
+                                )
+                            }
+                        }
+                    },
+                    onUpdate = { info -> startUpdate(info) }
+                )
             }
             ShareQrCard()
             AppCard {
@@ -255,31 +265,56 @@ private sealed interface UpdateState {
     data object Checking : UpdateState
     data object UpToDate : UpdateState
     data object Failed : UpdateState
+    data object DownloadFailed : UpdateState
     data class Available(val info: Updater.Info) : UpdateState
+    data class Downloading(val pct: Int) : UpdateState
 }
 
 @Composable
-private fun UpdateRow(st: UpdateState, onClick: () -> Unit) {
+private fun UpdateRow(st: UpdateState, onCheck: () -> Unit, onUpdate: (Updater.Info) -> Unit) {
     val c = MaterialTheme.colorScheme
-    val avail = st is UpdateState.Available
-    val title = stringResource(R.string.update_check)
+    val busy = st is UpdateState.Downloading
+    val accent = st is UpdateState.Available || busy
+    val title = when (st) {
+        is UpdateState.Available -> stringResource(R.string.update_available, st.info.tag)
+        is UpdateState.Downloading -> stringResource(R.string.update_downloading, st.pct)
+        else -> stringResource(R.string.update_check)
+    }
     val sub = when (st) {
         UpdateState.Idle -> stringResource(R.string.update_tap)
         UpdateState.Checking -> stringResource(R.string.update_checking)
         UpdateState.UpToDate -> stringResource(R.string.update_latest)
         UpdateState.Failed -> stringResource(R.string.update_failed)
-        is UpdateState.Available -> stringResource(R.string.update_available, st.info.tag)
+        UpdateState.DownloadFailed -> stringResource(R.string.update_download_failed)
+        is UpdateState.Available -> stringResource(R.string.update_now)
+        is UpdateState.Downloading -> stringResource(R.string.update_install_hint)
     }
-    AppCard(Modifier.clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick)) {
+    AppCard(
+        Modifier.clip(RoundedCornerShape(22.dp))
+            .clickable(enabled = !busy && st !is UpdateState.Checking) {
+                when (st) {
+                    is UpdateState.Available -> onUpdate(st.info)
+                    UpdateState.Checking, is UpdateState.Downloading -> { /* running */ }
+                    else -> onCheck()
+                }
+            }
+    ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(c.primary.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon8(if (avail) Ico.DOWN else Ico.REFRESH, c.primary, 22.dp)
+                Icon8(if (accent) Ico.DOWN else Ico.REFRESH, c.primary, 22.dp)
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold)
-                Text(sub, fontSize = 12.sp, color = if (st == UpdateState.Failed) c.error else if (avail) c.primary else c.onSurfaceVariant)
+                Text(sub, fontSize = 12.sp, color = if (st == UpdateState.Failed || st is UpdateState.DownloadFailed) c.error else if (accent) c.primary else c.onSurfaceVariant)
             }
+        }
+        if (st is UpdateState.Downloading) {
+            LinearProgressIndicator(
+                progress = { st.pct / 100f },
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp).fillMaxWidth(),
+                trackColor = c.surfaceContainerHigh
+            )
         }
     }
 }

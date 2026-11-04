@@ -1,26 +1,30 @@
 package ir.mrkiyan.eligius
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Only checks the latest GitHub release of Eligius. It never downloads or installs anything.
- * It points at this project's own release feed, which is the official Eligius release
- * infrastructure (github.com/designerkiyan-maker/8vpn) — never at the old 8 VPN feed.
+ * In-app update channel: checks this project's own GitHub releases, downloads the APK that
+ * matches the device ABI into the app cache and hands it to the system installer — the user
+ * never leaves the app and never sees a GitHub address (URLs are internal details only).
  */
 object Updater {
     const val ENABLED = true
     private const val RELEASES_API = "https://api.github.com/repos/designerkiyan-maker/8vpn/releases/latest"
-    private const val RELEASES_PAGE = "https://github.com/designerkiyan-maker/8vpn/releases/latest"
+    private const val ASSET_BASE = "https://github.com/designerkiyan-maker/8vpn/releases/download"
 
-    data class Info(val tag: String, val newer: Boolean, val url: String)
+    data class Info(val tag: String, val newer: Boolean)
 
     suspend fun check(): Result<Info> = withContext(Dispatchers.IO) {
         runCatching {
-            if (RELEASES_API.isEmpty()) error("Update checking is not configured for this build")
             val con = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10_000
                 readTimeout = 15_000
@@ -31,12 +35,77 @@ object Updater {
                 if (con.responseCode != 200) error("HTTP ${con.responseCode}")
                 val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
                 val tag = j.getString("tag_name")
-                val page = j.optString("html_url", RELEASES_PAGE)
-                Info(tag, isNewer(tag, BuildConfig.VERSION_NAME), page)
+                Info(tag, isNewer(tag, BuildConfig.VERSION_NAME))
             } finally {
                 con.disconnect()
             }
         }
+    }
+
+    /** The release APK that matches this device's primary ABI (universal as the safe default). */
+    fun apkUrl(tag: String): String = "$ASSET_BASE/$tag/Eligius-${abiAsset()}.apk"
+
+    private fun abiAsset(): String {
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return "universal"
+        return when {
+            abi.startsWith("arm64") -> "arm64-v8a"
+            abi.startsWith("armeabi") -> "armeabi-v7a"
+            else -> "universal"
+        }
+    }
+
+    /** Streams [url] into [dest], reporting 0-100 progress while it runs. */
+    suspend fun download(url: String, dest: File, onProgress: (Int) -> Unit): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                dest.parentFile?.mkdirs()
+                if (dest.exists()) dest.delete()
+                val con = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 30_000
+                    setRequestProperty("User-Agent", "eligius-android")
+                }
+                try {
+                    if (con.responseCode != 200) error("HTTP ${con.responseCode}")
+                    val total = con.contentLengthLong
+                    con.inputStream.use { input ->
+                        dest.outputStream().use { out ->
+                            val buf = ByteArray(64 * 1024)
+                            var read = 0L
+                            var lastPct = -1
+                            while (true) {
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                out.write(buf, 0, n)
+                                read += n
+                                if (total > 0) {
+                                    val pct = (read * 100 / total).toInt()
+                                    if (pct != lastPct) {
+                                        lastPct = pct
+                                        onProgress(pct.coerceIn(0, 100))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (total > 0 && dest.length() != total) error("Incomplete download")
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
+    /** Hands the downloaded APK to the system installer. Returns false when nothing could start it. */
+    fun launchInstall(ctx: Context, file: File): Boolean = try {
+        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", file)
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        true
+    } catch (_: Exception) {
+        false
     }
 
     private fun parts(v: String) = v.trim().trimStart('v', 'V').split('.', '-', '_')
