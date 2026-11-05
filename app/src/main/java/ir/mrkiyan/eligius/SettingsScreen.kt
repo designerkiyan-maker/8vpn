@@ -212,7 +212,7 @@ fun SettingsScreen(
                 ActionRow(Ico.LOGS, stringResource(R.string.open_logs), onClick = openLogs)
                 ActionRow(Ico.TRASH, stringResource(R.string.clear_cache), enabled = st.phase == Phase.IDLE, danger = true) { confirmClear = true }
             }
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(88.dp))
         }
     }
 

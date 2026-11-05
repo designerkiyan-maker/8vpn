@@ -145,6 +145,8 @@
     <string name="register_title">Create your account</string>
     <string name="logged_in_as">Signed in as %1$s</string>
     <string name="logout">Log out</string>
+    <string name="nav_connection">Connection</string>
+    <string name="account">Account</string>
 
     <string name="notif_channel">VPN status</string>
     <string name="endpoint">Custom endpoint</string>

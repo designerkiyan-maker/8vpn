@@ -132,7 +132,7 @@ private fun LogLine(line: String) {
 }
 
 @Composable
-fun AboutScreen(back: () -> Unit) {
+fun AccountScreen(back: () -> Unit) {
     val ctx = LocalContext.current
     val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -170,7 +170,7 @@ fun AboutScreen(back: () -> Unit) {
             performUpdate(info)
         }
     }
-    Page(stringResource(R.string.about), back) {
+    Page(stringResource(R.string.account), back) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 LogoMark(84.dp)

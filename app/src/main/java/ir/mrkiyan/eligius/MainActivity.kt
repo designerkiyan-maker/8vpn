@@ -1,17 +1,23 @@
 package ir.mrkiyan.eligius
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -62,7 +68,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Root(onLanguageChanged: () -> Unit) {
     val ctx = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val auth by AuthStore.flow.collectAsStateWithLifecycle()
+    val st by Engine.status.collectAsStateWithLifecycle()
+    val paused by Engine.paused.collectAsStateWithLifecycle()
+    val s by SettingsStore.flow.collectAsStateWithLifecycle()
     var screen by rememberSaveable { mutableIntStateOf(if (AuthStore.isLoggedIn) HOME else AUTH) }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -83,43 +93,79 @@ private fun Root(onLanguageChanged: () -> Unit) {
     }
 
     BackHandler(enabled = screen == AUTH) { }   // the gate: no backing out of the login screen
-    BackHandler(enabled = screen != HOME && screen != AUTH) {
-        screen = if (screen == SPLIT || screen == ABOUT) SETTINGS else HOME
+    BackHandler(enabled = screen == LOGS) { screen = HOME }
+    BackHandler(enabled = screen == SPLIT) { screen = SETTINGS }
+    // AUTH_WEB: AuthWebScreen registers its own handler (WebView history first).
+
+    // The big connect button in the bottom bar: start / stop the tunnel, then land on Home.
+    val vpnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == Activity.RESULT_OK) TunnelService.start(ctx)
+    }
+    fun toggleConnect() {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (st.phase == Phase.IDLE) {
+            val i = if (s.vpnMode) VpnService.prepare(ctx) else null
+            if (i != null) vpnLauncher.launch(i) else TunnelService.start(ctx)
+        } else if (st.phase != Phase.STOPPING) {
+            TunnelService.stop(ctx)
+        }
+        screen = HOME
     }
 
     val glow = LocalExtra.current.a
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(glow.copy(alpha = 0.10f), Color.Transparent), endY = 900f)
-            )
-        ) {
-            AnimatedContent(
-                targetState = screen,
-                transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
-                label = "nav"
-            ) { sc ->
-                when (sc) {
-                    HOME -> HomeScreen(openSettings = { screen = SETTINGS }, openLogs = { screen = LOGS })
-                    SETTINGS -> SettingsScreen(
-                        back = { screen = HOME }, openLogs = { screen = LOGS }, openAbout = { screen = ABOUT },
-                        openSplit = { screen = SPLIT }, onLanguageChanged = onLanguageChanged
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(listOf(glow.copy(alpha = 0.10f), Color.Transparent), endY = 900f)
                     )
-                    LOGS -> LogsScreen(back = { screen = HOME })
-                    ABOUT -> AboutScreen(back = { screen = SETTINGS })
-                    SPLIT -> SplitScreen(back = { screen = SETTINGS })
-                    AUTH -> AuthScreen(onRegister = { screen = AUTH_WEB })
-                    AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
+                ) {
+                    AnimatedContent(
+                        targetState = screen,
+                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
+                        label = "nav"
+                    ) { sc ->
+                        when (sc) {
+                            HOME -> HomeScreen(openLogs = { screen = LOGS })
+                            CONNECTION -> ConnectionScreen(back = { screen = HOME })
+                            SETTINGS -> SettingsScreen(
+                                back = { screen = HOME }, openLogs = { screen = LOGS }, openAbout = { screen = ACCOUNT },
+                                openSplit = { screen = SPLIT }, onLanguageChanged = onLanguageChanged
+                            )
+                            ACCOUNT -> AccountScreen(back = { screen = HOME })
+                            LOGS -> LogsScreen(back = { screen = HOME })
+                            SPLIT -> SplitScreen(back = { screen = SETTINGS })
+                            AUTH -> AuthScreen(onRegister = { screen = AUTH_WEB })
+                            AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
+                        }
+                    }
                 }
             }
+        }
+        if (screen == HOME || screen == CONNECTION || screen == SETTINGS || screen == ACCOUNT) {
+            BottomBar(
+                connectionSelected = screen == CONNECTION,
+                settingsSelected = screen == SETTINGS,
+                accountSelected = screen == ACCOUNT,
+                phase = st.phase,
+                paused = paused,
+                family = s.route.family,
+                onConnection = { screen = CONNECTION },
+                onSettings = { screen = SETTINGS },
+                onAccount = { screen = ACCOUNT },
+                onRescan = { TunnelService.rescan(ctx) },
+                onConnect = { toggleConnect() }
+            )
         }
     }
 }
 
 private const val HOME = 0
-private const val SETTINGS = 1
-private const val LOGS = 2
-private const val ABOUT = 3
-private const val SPLIT = 4
-private const val AUTH = 5
-private const val AUTH_WEB = 6
+private const val CONNECTION = 1
+private const val SETTINGS = 2
+private const val ACCOUNT = 3
+private const val LOGS = 4
+private const val SPLIT = 5
+private const val AUTH = 6
+private const val AUTH_WEB = 7

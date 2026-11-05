@@ -67,7 +67,7 @@ import androidx.compose.ui.unit.sp
 
 enum class Ico {
     BACK, SETTINGS, LOGS, POWER, CHECK, CHEVRON, LOCK, DOWN, UP, BOLT, GLOBE, REFRESH,
-    COPY, SHARE, TRASH, INFO, CODE, SEND, PAUSE, PLAY
+    COPY, SHARE, TRASH, INFO, CODE, SEND, PAUSE, PLAY, USER
 }
 
 @Composable
@@ -117,6 +117,10 @@ fun Icon8(ico: Ico, tint: Color, sz: Dp = 22.dp, modifier: Modifier = Modifier, 
             Ico.DOWN -> { line(12f, 4f, 12f, 16f); poly(false, 6f, 11f, 12f, 17f, 18f, 11f); line(5f, 21f, 19f, 21f) }
             Ico.UP -> { line(12f, 20f, 12f, 8f); poly(false, 6f, 13f, 12f, 7f, 18f, 13f); line(5f, 3f, 19f, 3f) }
             Ico.BOLT -> poly(true, 13f, 3f, 5f, 13.5f, 11f, 13.5f, 10f, 21f, 19f, 10f, 13f, 10f)
+            Ico.USER -> {
+                drawCircle(tint, radius = 3.2f * u, center = p(12f, 8.2f), style = st)
+                drawArc(tint, startAngle = 175f, sweepAngle = 190f, useCenter = false, topLeft = p(5.5f, 12.8f), size = Size(13f * u, 12f * u), style = st)
+            }
             Ico.GLOBE -> {
                 drawCircle(tint, radius = 9f * u, center = p(12f, 12f), style = st)
                 drawOval(tint, topLeft = p(8f, 3f), size = Size(8f * u, 18f * u), style = st)
