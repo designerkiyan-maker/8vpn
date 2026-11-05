@@ -28,9 +28,26 @@ object AuthStore {
     private const val WP_BASE = "https://wp.mrkiyan.ir"
 
     /** A signed-in account. [exp] is epoch seconds; 0 = no known expiry. */
-    data class Session(val user: String, val token: String?, val exp: Long)
+    data class Session(
+        val user: String,        // display name
+        val username: String,    // login name
+        val email: String,
+        val token: String?,
+        val exp: Long,
+    )
+
+    /** Full profile as reported by /wp-json/wp/v2/users/me (null = not fetched / form session). */
+    data class Profile(
+        val id: Long,
+        val username: String,
+        val name: String,
+        val email: String,
+        val registered: String,
+        val role: String,
+    )
 
     val flow = MutableStateFlow<Session?>(null)
+    val profile = MutableStateFlow<Profile?>(null)
     val isLoggedIn: Boolean get() = flow.value != null
     val registerUrl: String get() = "$WP_BASE/wp-login.php?action=register"
 
@@ -42,7 +59,13 @@ object AuthStore {
         val user = prefs!!.getString("user", null)
         val exp = prefs!!.getLong("exp", 0L)
         if (user != null && (exp == 0L || exp > System.currentTimeMillis() / 1000)) {
-            flow.value = Session(user, prefs!!.getString("token", null), exp)
+            flow.value = Session(
+                user,
+                prefs!!.getString("username", null) ?: user,
+                prefs!!.getString("email", "") ?: "",
+                prefs!!.getString("token", null),
+                exp,
+            )
         } else {
             prefs!!.edit().clear().apply()
         }
@@ -50,7 +73,40 @@ object AuthStore {
 
     fun logout() {
         flow.value = null
+        profile.value = null
         prefs?.edit()?.clear()?.apply()
+    }
+
+    /**
+     * Fetches the full WordPress profile (id, username, email, registered date, role) with the
+     * stored JWT. Only possible for token sessions; form-login sessions stay on the basics.
+     */
+    suspend fun fetchProfile(): Result<Profile> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = flow.value?.token ?: error("No token session")
+            val con = (URL("$WP_BASE/wp-json/wp/v2/users/me").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("User-Agent", "eligius-android")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                if (con.responseCode != 200) error("HTTP ${con.responseCode}")
+                val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
+                val roles = j.optJSONArray("roles")
+                Profile(
+                    id = j.optLong("id", 0L),
+                    username = j.optString("username", flow.value?.username ?: ""),
+                    name = j.optString("name", flow.value?.user ?: ""),
+                    email = j.optString("email", flow.value?.email ?: ""),
+                    registered = j.optString("registered_date", ""),
+                    role = if (roles != null && roles.length() > 0) roles.getString(0) else "",
+                ).also { profile.value = it }
+            } finally {
+                con.disconnect()
+            }
+        }
     }
 
     suspend fun login(user: String, pass: String): Result<Session> = withContext(Dispatchers.IO) {
@@ -85,8 +141,10 @@ object AuthStore {
                 )
             }
             val token = j.optString("token")
-            val name = j.optJSONObject("data")?.optString("user_display_name")?.takeIf { it.isNotEmpty() } ?: user
-            return save(Session(name, token.ifEmpty { null }, jwtExp(token)))
+            val data = j.optJSONObject("data")
+            val name = data?.optString("user_display_name")?.takeIf { it.isNotEmpty() } ?: user
+            val email = data?.optString("user_email")?.takeIf { it.isNotEmpty() } ?: ""
+            return save(Session(name, user, email, token.ifEmpty { null }, jwtExp(token)))
         } finally {
             con.disconnect()
         }
@@ -114,7 +172,7 @@ object AuthStore {
             val cookies = con.headerFields?.get("set-cookie")?.joinToString("; ") ?: ""
             if (cookies.contains("wordpress_logged_in")) {
                 // 14 days, the same lifetime WordPress gives "remember me" sessions.
-                return save(Session(user, null, System.currentTimeMillis() / 1000 + 14 * 24 * 3600L))
+                return save(Session(user, user, "", null, System.currentTimeMillis() / 1000 + 14 * 24 * 3600L))
             }
             val html = (if (code in 200..299) con.inputStream else con.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
@@ -147,7 +205,13 @@ object AuthStore {
 
     private fun save(s: Session): Session {
         flow.value = s
-        prefs?.edit()?.putString("user", s.user)?.putString("token", s.token)?.putLong("exp", s.exp)?.apply()
+        prefs?.edit()
+            ?.putString("user", s.user)
+            ?.putString("username", s.username)
+            ?.putString("email", s.email)
+            ?.putString("token", s.token)
+            ?.putLong("exp", s.exp)
+            ?.apply()
         return s
     }
 

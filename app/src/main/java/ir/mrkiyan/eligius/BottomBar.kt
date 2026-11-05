@@ -27,25 +27,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Bottom navigation: [Rescan] [Connection] — floating Connect — [Settings] [Account].
- * The big connect button floats half over the bar; Rescan is an action, not a screen, so it
- * dims unless an Aether route is connected.
+ * Bottom navigation: [Logs] [Connection] — floating Connect — [Settings] [Account].
+ * The big connect button floats half over the bar.
  */
 @Composable
 fun BottomBar(
     connectionSelected: Boolean,
     settingsSelected: Boolean,
     accountSelected: Boolean,
+    logsSelected: Boolean,
     phase: Phase,
-    paused: Boolean,
-    family: Family,
     onConnection: () -> Unit,
     onSettings: () -> Unit,
     onAccount: () -> Unit,
-    onRescan: () -> Unit,
+    onLogs: () -> Unit,
     onConnect: () -> Unit,
 ) {
-    val rescanEnabled = phase == Phase.CONNECTED && !paused && family == Family.AETHER
     Box(Modifier.fillMaxWidth()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)) {
             Row(
@@ -53,7 +50,7 @@ fun BottomBar(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                BarSlot(Ico.REFRESH, stringResource(R.string.rescan), selected = false, enabled = rescanEnabled, onClick = onRescan)
+                BarSlot(Ico.LOGS, stringResource(R.string.logs), selected = logsSelected, enabled = true, onClick = onLogs)
                 BarSlot(Ico.GLOBE, stringResource(R.string.nav_connection), selected = connectionSelected, enabled = true, onClick = onConnection)
                 Spacer(Modifier.width(84.dp))   // room for the floating connect button
                 BarSlot(Ico.SETTINGS, stringResource(R.string.settings), selected = settingsSelected, enabled = true, onClick = onSettings)

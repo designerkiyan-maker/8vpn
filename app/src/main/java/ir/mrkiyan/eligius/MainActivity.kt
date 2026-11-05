@@ -15,7 +15,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -113,7 +112,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
     }
 
     val glow = LocalExtra.current.a
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Box(Modifier.weight(1f)) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Box(
@@ -130,7 +129,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
                             HOME -> HomeScreen(openLogs = { screen = LOGS })
                             CONNECTION -> ConnectionScreen(back = { screen = HOME })
                             SETTINGS -> SettingsScreen(
-                                back = { screen = HOME }, openLogs = { screen = LOGS }, openAbout = { screen = ACCOUNT },
+                                back = { screen = HOME }, openLogs = { screen = LOGS },
                                 openSplit = { screen = SPLIT }, onLanguageChanged = onLanguageChanged
                             )
                             ACCOUNT -> AccountScreen(back = { screen = HOME })
@@ -148,13 +147,12 @@ private fun Root(onLanguageChanged: () -> Unit) {
                 connectionSelected = screen == CONNECTION,
                 settingsSelected = screen == SETTINGS,
                 accountSelected = screen == ACCOUNT,
+                logsSelected = screen == LOGS,
                 phase = st.phase,
-                paused = paused,
-                family = s.route.family,
                 onConnection = { screen = CONNECTION },
                 onSettings = { screen = SETTINGS },
                 onAccount = { screen = ACCOUNT },
-                onRescan = { TunnelService.rescan(ctx) },
+                onLogs = { screen = LOGS },
                 onConnect = { toggleConnect() }
             )
         }

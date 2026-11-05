@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -139,6 +140,9 @@ fun AccountScreen(back: () -> Unit) {
     var upd by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
 
     var pendingUpdate by remember { mutableStateOf<Updater.Info?>(null) }
+    val session by AuthStore.flow.collectAsStateWithLifecycle()
+    val profile by AuthStore.profile.collectAsStateWithLifecycle()
+    LaunchedEffect(session?.token) { if (session?.token != null) AuthStore.fetchProfile() }
 
     fun performUpdate(info: Updater.Info) {
         scope.launch {
@@ -173,9 +177,21 @@ fun AccountScreen(back: () -> Unit) {
     Page(stringResource(R.string.account), back) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                LogoMark(84.dp)
+                Box(
+                    Modifier.size(84.dp).clip(CircleShape).background(LocalExtra.current.gradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        (profile?.name ?: session?.user ?: "E").take(1).uppercase(),
+                        fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Color.White
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
-                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(profile?.name?.ifEmpty { session?.user } ?: session?.user ?: "", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "@" + (profile?.username?.ifEmpty { session?.username } ?: session?.username ?: ""),
+                    style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, fontFamily = FontFamily.Monospace
+                )
                 Spacer(Modifier.height(6.dp))
                 Box(Modifier.clip(RoundedCornerShape(50)).background(c.primary.copy(alpha = 0.14f)).padding(horizontal = 12.dp, vertical = 4.dp)) {
                     Text("v" + BuildConfig.VERSION_NAME, color = c.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -183,24 +199,16 @@ fun AccountScreen(back: () -> Unit) {
             }
             AppCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    InfoRow(stringResource(R.string.profile_email), profile?.email?.ifEmpty { session?.email }?.ifEmpty { "—" } ?: "—")
+                    profile?.registered?.takeIf { it.isNotEmpty() }?.let {
+                        InfoRow(stringResource(R.string.profile_member_since), it.take(10))
+                    }
+                    profile?.role?.takeIf { it.isNotEmpty() }?.let {
+                        InfoRow(stringResource(R.string.profile_role), it.replaceFirstChar { ch -> ch.uppercase() })
+                    }
                     InfoRow(stringResource(R.string.app_version), BuildConfig.VERSION_NAME)
                     InfoRow(stringResource(R.string.core_version), "2.4.0")
                     InfoRow(stringResource(R.string.tunnel_version), "2.19.0")
-                }
-            }
-            AuthStore.flow.collectAsStateWithLifecycle().value?.let { s ->
-                AppCard {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon8(Ico.INFO, c.primary, 22.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            stringResource(R.string.logged_in_as, s.user),
-                            Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium
-                        )
-                        TextButton(onClick = { AuthStore.logout() }) {
-                            Text(stringResource(R.string.logout), color = c.error, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
                 }
             }
             if (Updater.ENABLED) {
@@ -221,14 +229,13 @@ fun AccountScreen(back: () -> Unit) {
                 )
             }
             ShareQrCard()
-            AppCard {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(stringResource(R.string.license_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.primary)
-                    Text(stringResource(R.string.license_text), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
-                    Text("github.com/CluvexStudio/Aether\ngithub.com/heiher/hev-socks5-tunnel", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = c.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = { AuthStore.logout() },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = c.error.copy(alpha = 0.12f), contentColor = c.error)
+            ) { Text(stringResource(R.string.logout), fontWeight = FontWeight.SemiBold) }
+            Spacer(Modifier.height(96.dp))
         }
     }
 }

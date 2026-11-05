@@ -229,6 +229,10 @@ fun HomeScreen(openLogs: () -> Unit) {
                         if (paused) TunnelService.resume(ctx) else TunnelService.pause(ctx)
                     }
                 }
+                // Rescan lives here, its original place (also reachable from the Connection tab bar era).
+                if (s.route.family == Family.AETHER) {
+                    TonalPill(Ico.REFRESH, stringResource(R.string.rescan), enabled = !paused) { TunnelService.rescan(ctx) }
+                }
             }
         }
 

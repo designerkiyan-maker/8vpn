@@ -2,9 +2,11 @@ package ir.mrkiyan.eligius
 
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -20,8 +22,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
 
@@ -31,7 +35,6 @@ private fun up(f: (Settings) -> Settings) = SettingsStore.update(f)
 fun SettingsScreen(
     back: () -> Unit,
     openLogs: () -> Unit,
-    openAbout: () -> Unit,
     openSplit: () -> Unit,
     onLanguageChanged: () -> Unit,
 ) {
@@ -41,9 +44,7 @@ fun SettingsScreen(
     var confirmClear by remember { mutableStateOf(false) }
     var regionDialog by remember { mutableStateOf(false) }
 
-    Page(stringResource(R.string.settings), back, actions = {
-        IconBtn(Ico.INFO, openAbout)
-    }) {
+    Page(stringResource(R.string.settings), back) {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Banner(stringResource(R.string.restart_note))
 
@@ -211,6 +212,16 @@ fun SettingsScreen(
                 Hint(stringResource(R.string.tunnel_note))
                 ActionRow(Ico.LOGS, stringResource(R.string.open_logs), onClick = openLogs)
                 ActionRow(Ico.TRASH, stringResource(R.string.clear_cache), enabled = st.phase == Phase.IDLE, danger = true) { confirmClear = true }
+            }
+            AppCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.license_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.license_text), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "github.com/CluvexStudio/Aether\ngithub.com/heiher/hev-socks5-tunnel",
+                        fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Spacer(Modifier.height(88.dp))
         }

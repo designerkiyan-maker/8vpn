@@ -142,6 +142,10 @@
     <string name="logout">خروج از حساب</string>
     <string name="nav_connection">اتصال</string>
     <string name="account">حساب</string>
+    <string name="profile_email">ایمیل</string>
+    <string name="profile_member_since">عضو از</string>
+    <string name="profile_role">نقش</string>
+    <string name="locked_title">اتصال فعال است</string>
 
     <string name="notif_channel">وضعیت VPN</string>
     <string name="endpoint">اندپوینت سفارشی</string>

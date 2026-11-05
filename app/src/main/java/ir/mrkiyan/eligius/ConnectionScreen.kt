@@ -3,6 +3,7 @@ package ir.mrkiyan.eligius
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,33 +44,58 @@ private fun up(f: (Settings) -> Settings) = SettingsStore.update(f)
 /** Connection setup: mode, core/route, protocol, region and bridges — locked while connected. */
 @Composable
 fun ConnectionScreen(back: () -> Unit) {
+    val ctx = LocalContext.current
     val s by SettingsStore.flow.collectAsStateWithLifecycle()
     val st by Engine.status.collectAsStateWithLifecycle()
     val idle = st.phase == Phase.IDLE
+    var lockedDialog by remember { mutableStateOf(false) }
     Page(stringResource(R.string.nav_connection), back) {
-        Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Segmented(
-                listOf(true to stringResource(R.string.mode_vpn), false to stringResource(R.string.mode_proxy)),
-                s.vpnMode, idle
-            ) { v -> if (s.vpnMode != v) up { it.copy(vpnMode = v) } }
-            Segmented(
-                listOf(
-                    Family.AETHER to stringResource(R.string.core_aether),
-                    Family.PSIPHON to stringResource(R.string.core_psiphon),
-                    Family.TOR to stringResource(R.string.core_tor)
-                ),
-                s.route.family, idle
-            ) { fam ->
-                if (s.route.family != fam) up {
-                    it.copy(route = when (fam) { Family.AETHER -> Route.AETHER; Family.PSIPHON -> Route.PSIPHON_ONLY; Family.TOR -> Route.TOR_ONLY })
+        Box {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Segmented(
+                    listOf(true to stringResource(R.string.mode_vpn), false to stringResource(R.string.mode_proxy)),
+                    s.vpnMode, idle
+                ) { v -> if (s.vpnMode != v) up { it.copy(vpnMode = v) } }
+                Segmented(
+                    listOf(
+                        Family.AETHER to stringResource(R.string.core_aether),
+                        Family.PSIPHON to stringResource(R.string.core_psiphon),
+                        Family.TOR to stringResource(R.string.core_tor)
+                    ),
+                    s.route.family, idle
+                ) { fam ->
+                    if (s.route.family != fam) up {
+                        it.copy(route = when (fam) { Family.AETHER -> Route.AETHER; Family.PSIPHON -> Route.PSIPHON_ONLY; Family.TOR -> Route.TOR_ONLY })
+                    }
                 }
+                if (!idle) Hint(stringResource(R.string.locked_hint))
+                FamilyPanel(s.route.family, s, idle)
             }
-            if (!idle) Hint(stringResource(R.string.locked_hint))
-            FamilyPanel(s.route.family, s, idle)
+            // While connected the whole panel is locked: any tap explains why and offers to disconnect.
+            if (!idle) {
+                Box(Modifier.matchParentSize().clickable { lockedDialog = true })
+            }
         }
+    }
+    if (lockedDialog) {
+        AlertDialog(
+            onDismissRequest = { lockedDialog = false },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            title = { Text(stringResource(R.string.locked_title), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.locked_hint)) },
+            confirmButton = {
+                TextButton(onClick = { TunnelService.stop(ctx); lockedDialog = false }) {
+                    Text(stringResource(R.string.disconnect), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { lockedDialog = false }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
     }
 }
 
