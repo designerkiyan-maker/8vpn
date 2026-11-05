@@ -134,7 +134,13 @@ fun AuthWebScreen(onBack: () -> Unit) {
                 WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    webViewClient = WebViewClient()   // keeps every navigation inside this WebView
+                    webViewClient = object : WebViewClient() {
+                        // Keeps navigation inside, and re-applies the Eligius theme on every page
+                        // (register form, errors, check-your-email, login link…).
+                        override fun onPageFinished(view: WebView, url: String) {
+                            view.evaluateJavascript(BRAND_JS, null)
+                        }
+                    }
                     loadUrl(AuthStore.registerUrl)
                     web = this
                 }
@@ -142,3 +148,44 @@ fun AuthWebScreen(onBack: () -> Unit) {
         )
     }
 }
+
+/**
+ * Injected into every wp.mrkiyan.ir page: hides the WordPress logo and repaints the whole
+ * page in the Eligius theme (dark violet, gradient button, brand header) so registration
+ * feels like part of the app. No server changes needed.
+ */
+private const val BRAND_JS = """(function() {
+  if (location.hostname.indexOf('wp.mrkiyan.ir') === -1) return;
+  var css = ''
+    + 'body.login{background:#0D0A1A !important;}'
+    + 'body.login a{text-decoration:none;}'
+    + 'body.login #login{width:320px;padding:0;}'
+    + 'body.login #login h1{display:none !important;}'
+    + 'body.login form{background:#171130 !important;border:1px solid #352A58 !important;border-radius:18px !important;box-shadow:0 10px 40px rgba(0,0,0,.5) !important;padding:26px 24px !important;}'
+    + 'body.login form .input, body.login input[type=text], body.login input[type=password], body.login input[type=email]{background:#1F1840 !important;border:1px solid #352A58 !important;color:#E9E4F7 !important;border-radius:10px !important;padding:10px 12px !important;font-size:16px !important;}'
+    + 'body.login form .input:focus{border-color:#B07CFF !important;outline:none !important;box-shadow:0 0 0 3px rgba(176,124,255,.25) !important;}'
+    + 'body.login form label{color:#B2A6CE !important;font-size:13px !important;}'
+    + 'body.login #reg_passmail, body.login #nav, body.login #backtoblog{color:#B2A6CE !important;font-size:13px !important;}'
+    + 'body.login #nav a, body.login #backtoblog a, body.login #login_error a, body.login .message a{color:#B07CFF !important;font-weight:600;}'
+    + 'body.login #wp-submit{background:linear-gradient(135deg,#7E6BFF,#B07CFF) !important;border:none !important;color:#fff !important;border-radius:12px !important;padding:10px 14px !important;font-size:15px !important;font-weight:600 !important;width:100% !important;height:auto !important;text-shadow:none !important;cursor:pointer !important;}'
+    + 'body.login .message, body.login #login_error{background:#1F1840 !important;border-left:4px solid #B07CFF !important;color:#E9E4F7 !important;border-radius:10px !important;box-shadow:none !important;}'
+    + 'body.login #login_error{border-left-color:#FF8A8A !important;}'
+    + 'body.login .language-switcher{display:none !important;}'
+    + 'body.login #eligius-brand{margin-bottom:18px;text-align:center;font-family:system-ui,-apple-system,Segoe UI,sans-serif;}';
+  var head = document.head || document.getElementsByTagName('head')[0];
+  var style = document.createElement('style');
+  style.textContent = css;
+  head.appendChild(style);
+  var h1 = document.querySelector('#login h1');
+  if (h1) h1.parentNode.removeChild(h1);
+  var login = document.querySelector('#login');
+  if (login && !document.getElementById('eligius-brand')) {
+    var b = document.createElement('div');
+    b.id = 'eligius-brand';
+    b.innerHTML = ''
+      + '<div style="width:64px;height:64px;border-radius:18px;margin:0 auto 10px;background:linear-gradient(135deg,#7E6BFF,#B07CFF);display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800;color:#fff;box-shadow:0 0 30px rgba(176,124,255,.45);font-family:system-ui,sans-serif;">E</div>'
+      + '<div style="font-size:22px;font-weight:700;color:#ECE7F8;margin-bottom:4px;">Eligius VPN</div>'
+      + '<div style="font-size:11px;letter-spacing:3px;color:#B3A8CE;margin-bottom:18px;">BEYOND BOUNDARIES.</div>';
+    login.insertBefore(b, login.firstChild);
+  }
+})()"""
