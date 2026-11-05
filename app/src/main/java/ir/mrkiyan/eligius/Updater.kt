@@ -2,7 +2,9 @@ package ir.mrkiyan.eligius
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -89,11 +91,27 @@ object Updater {
                         }
                     }
                     if (total > 0 && dest.length() != total) error("Incomplete download")
+                    // Sanity: the payload must really be an APK (PK zip magic), not an error page.
+                    val magic = ByteArray(2)
+                    dest.inputStream().use { it.read(magic) }
+                    if (magic[0] != 'P'.code.toByte() || magic[1] != 'K'.code.toByte()) {
+                        dest.delete()
+                        error("Downloaded file is not an APK")
+                    }
                 } finally {
                     con.disconnect()
                 }
             }
         }
+
+    /** True when this app may hand APKs to the system installer (one-time user grant). */
+    fun canInstall(ctx: Context): Boolean = ctx.packageManager.canRequestPackageInstalls()
+
+    /** The system screen where the user flips the "install unknown apps" switch for this app. */
+    fun unknownSourcesIntent(ctx: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+            .setData(Uri.parse("package:" + ctx.packageName))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /** Hands the downloaded APK to the system installer. Returns false when nothing could start it. */
     fun launchInstall(ctx: Context, file: File): Boolean = try {

@@ -1,6 +1,8 @@
 package ir.mrkiyan.eligius
 
 import android.content.ClipData
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -135,6 +137,39 @@ fun AboutScreen(back: () -> Unit) {
     val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var upd by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+
+    var pendingUpdate by remember { mutableStateOf<Updater.Info?>(null) }
+
+    fun performUpdate(info: Updater.Info) {
+        scope.launch {
+            upd = UpdateState.Downloading(0)
+            val file = File(ctx.cacheDir, "updates/eligius-update.apk")
+            Updater.download(Updater.apkUrl(info.tag), file) { pct -> upd = UpdateState.Downloading(pct) }.fold(
+                onSuccess = {
+                    upd = UpdateState.Idle
+                    if (!Updater.launchInstall(ctx, file)) upd = UpdateState.DownloadFailed
+                },
+                onFailure = { upd = UpdateState.DownloadFailed }
+            )
+        }
+    }
+
+    val installPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val info = pendingUpdate
+        pendingUpdate = null
+        if (info != null && Updater.canInstall(ctx)) performUpdate(info)
+    }
+
+    fun startUpdate(info: Updater.Info) {
+        // Android 8+: installing needs the one-time "allow from this source" grant — ask for it
+        // before spending the download, then continue automatically when the user returns.
+        if (!Updater.canInstall(ctx)) {
+            pendingUpdate = info
+            installPermissionLauncher.launch(Updater.unknownSourcesIntent(ctx))
+        } else {
+            performUpdate(info)
+        }
+    }
     Page(stringResource(R.string.about), back) {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -169,19 +204,6 @@ fun AboutScreen(back: () -> Unit) {
                 }
             }
             if (Updater.ENABLED) {
-                fun startUpdate(info: Updater.Info) {
-                    scope.launch {
-                        upd = UpdateState.Downloading(0)
-                        val file = File(ctx.cacheDir, "updates/eligius-update.apk")
-                        Updater.download(Updater.apkUrl(info.tag), file) { pct -> upd = UpdateState.Downloading(pct) }.fold(
-                            onSuccess = {
-                                upd = UpdateState.Idle
-                                if (!Updater.launchInstall(ctx, file)) upd = UpdateState.DownloadFailed
-                            },
-                            onFailure = { upd = UpdateState.DownloadFailed }
-                        )
-                    }
-                }
                 UpdateRow(
                     st = upd,
                     onCheck = {
