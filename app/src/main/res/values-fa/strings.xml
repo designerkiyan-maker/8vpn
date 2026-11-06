@@ -145,6 +145,11 @@
     <string name="profile_email">ایمیل</string>
     <string name="profile_member_since">عضو از</string>
     <string name="profile_role">نقش</string>
+    <string name="net_wifi">وای‌فای</string>
+    <string name="net_mobile">دیتای موبایل</string>
+    <string name="net_ethernet">اترنت</string>
+    <string name="usage_title">مصرف</string>
+    <string name="usage_sessions">تعداد نشست</string>
     <string name="locked_title">اتصال فعال است</string>
     <string name="next_btn">بعدی</string>
 

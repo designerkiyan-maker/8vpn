@@ -87,6 +87,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
     LaunchedEffect(auth) {
         if (auth != lastAuth) {
             screen = if (auth != null) HOME else AUTH
+            Engine.loadUsage(auth?.username)
             lastAuth = auth
         }
     }

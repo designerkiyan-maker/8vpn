@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -495,6 +496,7 @@ class TunnelService : VpnService() {
             override fun onAvailable(network: Network) {
                 val prev = lastNet
                 lastNet = network
+                publishNetworkType(cm)
                 if (prev != null && prev != network &&
                     Engine.status.value.phase == Phase.CONNECTED &&
                     SystemClock.elapsedRealtime() - connectedAt > 3000
@@ -504,12 +506,27 @@ class TunnelService : VpnService() {
                     networkChanged = true
                 }
             }
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                publishNetworkType(cm)
+            }
         }
         try {
             cm.registerDefaultNetworkCallback(cb)
             netCb = cb
         } catch (e: Exception) {
             Engine.log("Network watcher unavailable: ${e.message}")
+        }
+    }
+
+    /** Publishes the transport of the default network: wifi / mobile / ethernet. */
+    private fun publishNetworkType(cm: ConnectivityManager) {
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return
+        Engine.networkType.value = when {
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+            else -> null
         }
     }
 
@@ -804,6 +821,7 @@ class TunnelService : VpnService() {
 
     private fun teardownBlocking() {
         unwatchNetwork()
+        Engine.networkType.value = null
         stopTunSide()
         core?.stop()
         core = null

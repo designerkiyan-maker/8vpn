@@ -82,14 +82,6 @@ private fun fmtRate(b: Long): String = when {
     else -> "$b B/s"
 }
 
-private fun fmtBytes(b: Long): String = when {
-    b < 0 -> "—"
-    b >= 1_073_741_824 -> String.format(Locale.US, "%.2f GB", b / 1_073_741_824.0)
-    b >= 1_048_576 -> String.format(Locale.US, "%.1f MB", b / 1_048_576.0)
-    b >= 1024 -> String.format(Locale.US, "%.1f KB", b / 1024.0)
-    else -> "$b B"
-}
-
 @Composable
 fun HomeScreen(openLogs: () -> Unit) {
     val ctx = LocalContext.current
@@ -105,6 +97,7 @@ fun HomeScreen(openLogs: () -> Unit) {
     val totalRx by Engine.totalRx.collectAsStateWithLifecycle()
     val totalTx by Engine.totalTx.collectAsStateWithLifecycle()
     val lastSession by Engine.lastSession.collectAsStateWithLifecycle()
+    val netType by Engine.networkType.collectAsStateWithLifecycle()
 
     val idle = st.phase == Phase.IDLE
     val scope = rememberCoroutineScope()
@@ -194,8 +187,14 @@ fun HomeScreen(openLogs: () -> Unit) {
         } else if (live && paused) {
             Text(stringResource(R.string.paused_hint), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, textAlign = TextAlign.Center)
         } else if (live) {
+            val netLabel = when (netType) {
+                "wifi" -> stringResource(R.string.net_wifi)
+                "mobile" -> stringResource(R.string.net_mobile)
+                "ethernet" -> stringResource(R.string.net_ethernet)
+                else -> null
+            }
             Text(
-                s.activeLabel() + (exit?.let { "  ·  $it" } ?: ""),
+                s.activeLabel() + (netLabel?.let { "  ·  $it" } ?: "") + (exit?.let { "  ·  $it" } ?: ""),
                 style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant, textAlign = TextAlign.Center
             )
         }
@@ -410,18 +409,6 @@ fun ConnectButton(phase: Phase, onClick: () -> Unit, diameter: Dp = 158.dp) {
 }
 
 // RegionDialog / RegionButton / FamilyPanel moved to ConnectionScreen.kt.
-
-@Composable
-private fun formatDuration(millis: Long): String {
-    val seconds = (millis / 1000) % 60
-    val minutes = (millis / (1000 * 60)) % 60
-    val hours = (millis / (1000 * 60 * 60)) % 24
-    val days = millis / (1000 * 60 * 60 * 24)
-    return if (days > 0) "${days}d ${hours}h"
-    else if (hours > 0) "${hours}h ${minutes}m"
-    else if (minutes > 0) "${minutes}m ${seconds}s"
-    else "${seconds}s"
-}
 
 @Composable
 private fun LastConnectionCard(

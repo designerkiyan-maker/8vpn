@@ -166,6 +166,11 @@
     <string name="profile_email">Email</string>
     <string name="profile_member_since">Member since</string>
     <string name="profile_role">Role</string>
+    <string name="net_wifi">Wi-Fi</string>
+    <string name="net_mobile">Mobile data</string>
+    <string name="net_ethernet">Ethernet</string>
+    <string name="usage_title">Usage</string>
+    <string name="usage_sessions">Sessions</string>
     <string name="locked_title">Connection is active</string>
     <string name="next_btn">Next</string>
 

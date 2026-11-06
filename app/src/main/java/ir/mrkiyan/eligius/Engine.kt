@@ -20,6 +20,14 @@ data class LastSession(
     val endedAt: Long,
 )
 
+/** Lifetime usage accumulated across every session, kept per account. */
+data class Usage(
+    val rxBytes: Long,
+    val txBytes: Long,
+    val durationMs: Long,
+    val sessions: Int,
+)
+
 /** Process-wide connection state shared by the service, the tile and the UI. */
 object Engine {
     val status = MutableStateFlow(Status())
@@ -46,6 +54,10 @@ object Engine {
     val totalTx = MutableStateFlow(0L)
     /** Persisted summary of the previous session (survives disconnects and app restarts). */
     val lastSession = MutableStateFlow<LastSession?>(null)
+    /** Lifetime usage of the signed-in account (accumulated across every session). */
+    val usage = MutableStateFlow(Usage(0, 0, 0, 0))
+    /** Key of the network the status labels show: "wifi" / "mobile" / "ethernet". */
+    val networkType = MutableStateFlow<String?>(null)
 
     private var statsPrefs: SharedPreferences? = null
 
@@ -91,6 +103,38 @@ object Engine {
             ?.putLong("avgSpeedBps", ls.avgSpeedBps)
             ?.putLong("endedAt", ls.endedAt)
             ?.apply()
+        accumulateUsage(rx, tx, dur)
+    }
+
+    /** Adds one finished session to the lifetime usage of the signed-in account. */
+    private fun accumulateUsage(rx: Long, tx: Long, durationMs: Long) {
+        val key = AuthStore.flow.value?.username ?: return
+        val cur = usage.value
+        val next = Usage(
+            rxBytes = cur.rxBytes + rx,
+            txBytes = cur.txBytes + tx,
+            durationMs = cur.durationMs + durationMs,
+            sessions = cur.sessions + 1,
+        )
+        usage.value = next
+        statsPrefs?.edit()
+            ?.putLong("usage_rx_$key", next.rxBytes)
+            ?.putLong("usage_tx_$key", next.txBytes)
+            ?.putLong("usage_dur_$key", next.durationMs)
+            ?.putInt("usage_sessions_$key", next.sessions)
+            ?.apply()
+    }
+
+    /** Loads the lifetime usage of the given account (call when auth changes). */
+    fun loadUsage(username: String?) {
+        val p = statsPrefs ?: return
+        val key = username?.takeIf { it.isNotBlank() } ?: run { usage.value = Usage(0, 0, 0, 0); return }
+        usage.value = Usage(
+            rxBytes = p.getLong("usage_rx_$key", 0L),
+            txBytes = p.getLong("usage_tx_$key", 0L),
+            durationMs = p.getLong("usage_dur_$key", 0L),
+            sessions = p.getInt("usage_sessions_$key", 0),
+        )
     }
 
     /** Appends one sample, keeps the graph window and accumulates session totals. */

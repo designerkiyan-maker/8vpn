@@ -142,6 +142,12 @@ fun AccountScreen(back: () -> Unit) {
     var pendingUpdate by remember { mutableStateOf<Updater.Info?>(null) }
     val session by AuthStore.flow.collectAsStateWithLifecycle()
     val profile by AuthStore.profile.collectAsStateWithLifecycle()
+    val usage by Engine.usage.collectAsStateWithLifecycle()
+    val totalRxLive by Engine.totalRx.collectAsStateWithLifecycle()
+    val totalTxLive by Engine.totalTx.collectAsStateWithLifecycle()
+    val st by Engine.status.collectAsStateWithLifecycle()
+    val liveNow = st.phase == Phase.CONNECTED
+    val liveDur = Engine.sessionStartWallMs?.let { System.currentTimeMillis() - it } ?: 0L
     LaunchedEffect(session?.token) { if (session?.token != null) AuthStore.fetchProfile() }
 
     fun performUpdate(info: Updater.Info) {
@@ -211,6 +217,15 @@ fun AccountScreen(back: () -> Unit) {
                     InfoRow(stringResource(R.string.tunnel_version), "2.19.0")
                 }
             }
+            AppCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(stringResource(R.string.usage_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.primary)
+                    InfoRow(stringResource(R.string.download), fmtBytes(usage.rxBytes + (if (liveNow) totalRxLive else 0L)))
+                    InfoRow(stringResource(R.string.upload), fmtBytes(usage.txBytes + (if (liveNow) totalTxLive else 0L)))
+                    InfoRow(stringResource(R.string.duration), formatDuration(usage.durationMs + (if (liveNow) liveDur else 0L)))
+                    InfoRow(stringResource(R.string.usage_sessions), "${usage.sessions + (if (liveNow) 1 else 0)}")
+                }
+            }
             if (Updater.ENABLED) {
                 UpdateRow(
                     st = upd,
@@ -230,7 +245,10 @@ fun AccountScreen(back: () -> Unit) {
             }
             ShareQrCard()
             Button(
-                onClick = { AuthStore.logout() },
+                onClick = {
+                    TunnelService.stop(ctx)   // disconnect before dropping the session
+                    AuthStore.logout()
+                },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = c.error.copy(alpha = 0.12f), contentColor = c.error)
