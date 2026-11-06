@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,8 +30,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,9 +48,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -143,7 +142,6 @@ fun HomeScreen(openLogs: () -> Unit) {
                 stringResource(R.string.app_name), Modifier.weight(1f),
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold
             )
-            IconBtn(Ico.LOGS, openLogs)
         }
 
         // ---- Status (the connect button lives in the bottom bar)
@@ -234,6 +232,17 @@ fun HomeScreen(openLogs: () -> Unit) {
                     TonalPill(Ico.REFRESH, stringResource(R.string.rescan), enabled = !paused) { TunnelService.rescan(ctx) }
                 }
             }
+        }
+
+        // ---- Last Connection Info Card
+        if (live || st.phase == Phase.RECONNECTING || st.phase == Phase.CONNECTING) {
+            Spacer(Modifier.height(16.dp))
+            LastConnectionCard(
+                live = live,
+                download = rx,
+                upload = tx,
+                speed = speed
+            )
         }
 
         Spacer(Modifier.height(96.dp))
@@ -379,6 +388,91 @@ fun ConnectButton(phase: Phase, onClick: () -> Unit, diameter: Dp = 158.dp) {
             Box(Modifier.fillMaxSize().alpha(busyA).background(x.busy))
             Icon8(Ico.POWER, fg, diameter * 0.40f, strokeW = 2.3f)
         }
+    }
+}
+
+// RegionDialog / RegionButton / FamilyPanel moved to ConnectionScreen.kt.
+
+@Composable
+private fun formatDuration(millis: Long): String {
+    val seconds = (millis / 1000) % 60
+    val minutes = (millis / (1000 * 60)) % 60
+    val hours = (millis / (1000 * 60 * 60)) % 24
+    val days = millis / (1000 * 60 * 60 * 24)
+    return if (days > 0) "${days}d ${hours}h"
+    else if (hours > 0) "${hours}h ${minutes}m"
+    else if (minutes > 0) "${minutes}m ${seconds}s"
+    else "${seconds}s"
+}
+
+@Composable
+private fun LastConnectionCard(
+    live: Boolean,
+    download: Long,
+    upload: Long,
+    speed: Long?
+) {
+    val c = MaterialTheme.colorScheme
+    val x = LocalExtra.current
+
+    AppCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(R.string.last_connection), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.onSurface)
+                Text(
+                    if (live) stringResource(R.string.live) else stringResource(R.string.last_session),
+                    style = MaterialTheme.typography.labelMedium, color = c.primary
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                InfoColumn(
+                    label = stringResource(R.string.duration),
+                    value = stringResource(R.string.calculating), // TODO: track actual duration
+                    color = x.a,
+                    modifier = Modifier.weight(1f)
+                )
+                InfoColumn(
+                    label = stringResource(R.string.download),
+                    value = fmtRate(download) + "/s",
+                    color = c.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                InfoColumn(
+                    label = stringResource(R.string.upload),
+                    value = fmtRate(upload) + "/s",
+                    color = c.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+                InfoColumn(
+                    label = stringResource(R.string.speed),
+                    value = speed?.let { fmtRate(it) } ?: "—",
+                    color = c.tertiary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoColumn(
+    label: String,
+    value: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val c = MaterialTheme.colorScheme
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, textAlign = TextAlign.Center)
     }
 }
 

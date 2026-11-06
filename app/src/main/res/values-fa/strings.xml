@@ -179,4 +179,11 @@
     <string name="http_share">اشتراک پروکسی HTTP با دستگاه‌های دیگه</string>
     <string name="http_addr">آدرس شنود پروکسی HTTP</string>
     <string name="addr_invalid">یه آدرس IPv4 بنویس، مثل 0.0.0.0 (همه‌ی شبکه‌ها) یا 192.168.43.1. متن نامعتبر مثل 0.0.0.0 حساب می‌شه.</string>
+
+    <string name="speed">سرعت</string>
+    <string name="last_connection">آخرین اتصال</string>
+    <string name="last_session">آخرین نشست</string>
+    <string name="live">زنده</string>
+    <string name="duration">مدت زمان</string>
+    <string name="calculating">در حال محاسبه…</string>
 </resources>

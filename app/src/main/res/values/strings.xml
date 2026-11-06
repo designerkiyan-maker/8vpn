@@ -143,6 +143,22 @@
     <string name="no_account">No account yet?</string>
     <string name="create_account">Create account</string>
     <string name="register_title">Create your account</string>
+    <string name="register_hint">Enter your details to create an account.</string>
+    <string name="first_name">First name</string>
+    <string name="last_name">Last name</string>
+    <string name="email">Email</string>
+    <string name="mobile">Mobile number</string>
+    <string name="national_code">National ID</string>
+    <string name="confirm_password">Confirm password</string>
+    <string name="register_btn">Register</string>
+    <string name="have_account">Already have an account?</string>
+    <string name="register_error">Registration failed. Please try again.</string>
+    <string name="passwords_mismatch">Passwords do not match.</string>
+    <string name="fill_all_fields">Please fill all fields.</string>
+    <string name="password_too_short">Password must be at least 8 characters.</string>
+    <string name="invalid_mobile">Invalid mobile number. Must be 11 digits.</string>
+    <string name="invalid_national_code">Invalid national code. Must be 10 digits.</string>
+    <string name="invalid_email">Invalid email address.</string>
     <string name="logged_in_as">Signed in as %1$s</string>
     <string name="logout">Log out</string>
     <string name="nav_connection">Connection</string>
@@ -184,4 +200,11 @@
     <string name="http_share">Share HTTP proxy with other devices</string>
     <string name="http_addr">HTTP proxy listen address</string>
     <string name="addr_invalid">Enter an IPv4 address such as 0.0.0.0 (all networks) or 192.168.43.1. Invalid text is treated as 0.0.0.0.</string>
+
+    <string name="speed">Speed</string>
+    <string name="last_connection">Last Connection</string>
+    <string name="last_session">Last Session</string>
+    <string name="live">Live</string>
+    <string name="duration">Duration</string>
+    <string name="calculating">Calculating…</string>
 </resources>

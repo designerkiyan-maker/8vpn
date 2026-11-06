@@ -135,7 +135,8 @@ private fun Root(onLanguageChanged: () -> Unit) {
                             ACCOUNT -> AccountScreen(back = { screen = HOME })
                             LOGS -> LogsScreen(back = { screen = HOME })
                             SPLIT -> SplitScreen(back = { screen = SETTINGS })
-                            AUTH -> AuthScreen(onRegister = { screen = AUTH_WEB })
+                            AUTH -> AuthScreen(onRegister = { screen = AUTH_REGISTER })
+                            AUTH_REGISTER -> AuthRegisterScreen(onBack = { screen = AUTH }, onLogin = { screen = HOME })
                             AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
                         }
                     }
@@ -167,3 +168,4 @@ private const val LOGS = 4
 private const val SPLIT = 5
 private const val AUTH = 6
 private const val AUTH_WEB = 7
+private const val AUTH_REGISTER = 8

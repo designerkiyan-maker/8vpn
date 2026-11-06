@@ -1,7 +1,5 @@
 package ir.mrkiyan.eligius
 
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,7 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 /** Login gate shown until a valid mrkiyan.ir account session exists. */
@@ -122,38 +120,26 @@ fun AuthScreen(onRegister: () -> Unit) {
 /** In-app browser for the WordPress registration page (register → confirm email → come back and sign in). */
 @Composable
 fun AuthWebScreen(onBack: () -> Unit) {
-    var web by remember { mutableStateOf<WebView?>(null) }
+    var web by remember { mutableStateOf<android.webkit.WebView?>(null) }
     BackHandler(enabled = true) {
         val w = web
         if (w != null && w.canGoBack()) w.goBack() else onBack()
     }
     Page(stringResource(R.string.register_title), onBack) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
+        androidx.compose.ui.viewinterop.AndroidView(
+            modifier = androidx.compose.ui.Modifier.fillMaxSize(),
             factory = { ctx ->
-                WebView(ctx).apply {
+                android.webkit.WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    webViewClient = object : WebViewClient() {
-                        // Keeps navigation inside, and re-applies the Eligius theme on every page
-                        // (register form, errors, check-your-email, login link…).
-                        override fun onPageFinished(view: WebView, url: String) {
-                            view.evaluateJavascript(BRAND_JS, null)
-                        }
-                    }
+                    webViewClient = android.webkit.WebViewClient()
                     loadUrl(AuthStore.registerUrl)
-                    web = this
                 }
             }
         )
     }
 }
 
-/**
- * Injected into every wp.mrkiyan.ir page: hides the WordPress logo and repaints the whole
- * page in the Eligius theme (dark violet, gradient button, brand header) so registration
- * feels like part of the app. No server changes needed.
- */
 private const val BRAND_JS = """(function() {
   if (location.hostname.indexOf('wp.mrkiyan.ir') === -1) return;
   var css = ''
