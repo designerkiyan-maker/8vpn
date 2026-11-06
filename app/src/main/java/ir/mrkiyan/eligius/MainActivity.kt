@@ -136,7 +136,9 @@ private fun Root(onLanguageChanged: () -> Unit) {
                             LOGS -> LogsScreen(back = { screen = HOME })
                             SPLIT -> SplitScreen(back = { screen = SETTINGS })
                             AUTH -> AuthScreen(onRegister = { screen = AUTH_REGISTER })
-                            AUTH_REGISTER -> AuthRegisterScreen(onBack = { screen = AUTH }, onLogin = { screen = HOME })
+                            // SECURITY FIX: "Log in" from the register screen opens the LOGIN screen,
+                            // never the app itself.
+                            AUTH_REGISTER -> AuthRegisterScreen(onBack = { screen = AUTH }, onLogin = { screen = AUTH })
                             AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
                         }
                     }

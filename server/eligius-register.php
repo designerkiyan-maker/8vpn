@@ -1,34 +1,57 @@
 <?php
 /**
- * Plugin Name: Eligius Register
- * Description: REST endpoint for the Eligius Android app — user registration with
- *              first name, last name, email, mobile and Iranian national code.
- *              Endpoint: POST /wp-json/eligius/v1/register
+ * Plugin Name: Eligius Register + Updates
+ * Description: REST endpoints for the Eligius Android app.
+ *              1) POST /wp-json/eligius/v1/register  — user registration with
+ *                 first/last name, email, mobile (doubles as username), Iranian
+ *                 national code and password. Full server-side validation.
+ *              2) GET  /wp-json/eligius/v1/version   — the latest released app
+ *                 version + APK download URL, powering the in-app updater
+ *                 (the app never talks to GitHub or any third-party service).
  *
- * Install: drop this file into wp-content/mu-plugins/ (create the folder if needed).
- * It loads automatically — nothing to activate, no settings.
+ * Install: drop this file into wp-content/mu-plugins/ (create the folder if
+ * needed). It loads automatically — nothing to activate.
  *
- * Payload (JSON):
- * {
- *   "username":     "09xxxxxxxxx",   // mobile, doubles as the login name
- *   "email":        "user@example.com",
- *   "password":     "at least 8 chars",
- *   "first_name":   "...",
- *   "last_name":    "...",
- *   "mobile":       "09xxxxxxxxx",
- *   "national_code":"10 digits"
- * }
- *
- * Success: 200 { "success": true, "message": "...", "username": "09..." }
- * Error:   4xx { "success": false, "message": "..." }   (message is safe to show in the app)
+ * ┌────────────────────────────────────────────────────────────────────────┐
+ * │  WHEN YOU PUBLISH A NEW APK: edit the two lines marked ✎ below and    │
+ * │  upload the new APK to the URL you set. That is the whole release      │
+ * │  process — every installed app picks it up on its next update check.   │
+ * └────────────────────────────────────────────────────────────────────────┘
  */
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
+/* ✎ 1) Latest released app version (compare numerically against the app).   */
+if ( ! defined( 'ELIGIUS_LATEST_VERSION' ) ) {
+	define( 'ELIGIUS_LATEST_VERSION', '1.3.4' );
+}
+/* ✎ 2) Direct URL of the released APK. Upload the APK to your site —        */
+/*      recommended: wp-content/uploads/eligius/Eligius-universal.apk        */
+if ( ! defined( 'ELIGIUS_LATEST_APK_URL' ) ) {
+	define( 'ELIGIUS_LATEST_APK_URL', 'https://wp.mrkiyan.ir/wp-content/uploads/eligius/Eligius-universal.apk' );
+}
+
+/* ──────────────────────────────  version  ────────────────────────────── */
+
+add_action( 'rest_api_init', function () {
+	register_rest_route( 'eligius/v1', '/version', array(
+		'methods'             => 'GET',
+		'permission_callback' => '__return_true',
+		'callback'            => function () {
+			return rest_ensure_response( array(
+				'version' => ELIGIUS_LATEST_VERSION,
+				'apk_url' => ELIGIUS_LATEST_APK_URL,
+			) );
+		},
+	) );
+} );
+
+/* ──────────────────────────────  register  ───────────────────────────── */
+
 add_action( 'rest_api_init', function () {
 	register_rest_route( 'eligius/v1', '/register', array(
 		'methods'             => 'POST',
-		'permission_callback' => '__return_true',   // public: it IS the registration endpoint
+		'permission_callback' => '__return_true',
 		'callback'            => 'eligius_register_handler',
 		'args'                => array(
 			'username'      => array( 'required' => true,  'type' => 'string' ),
@@ -45,7 +68,7 @@ add_action( 'rest_api_init', function () {
 /** Iranian national code checksum (10 digits, mod 11). */
 function eligius_valid_national_code( $code ) {
 	if ( ! preg_match( '/^\d{10}$/', $code ) ) return false;
-	if ( preg_match( '/^(\d)\1{9}$/', $code ) ) return false;   // all digits identical
+	if ( preg_match( '/^(\d)\1{9}$/', $code ) ) return false;
 	$sum = 0;
 	for ( $i = 0; $i < 9; $i++ ) $sum += ( (int) $code[ $i ] ) * ( 10 - $i );
 	$r = $sum % 11;
@@ -79,7 +102,7 @@ function eligius_register_handler( WP_REST_Request $req ) {
 	$mobile        = preg_replace( '/\D/', '', (string) $req->get_param( 'mobile' ) );
 	$national_code = preg_replace( '/\D/', '', (string) $req->get_param( 'national_code' ) );
 
-	// Normalize Iranian mobile: 9xxxxxxxxx / 989xxxxxxxxx -> 09xxxxxxxxx
+	// Normalize Iranian mobile: 9xxxxxxxxx / 989xxxxxxxxx / +989xxxxxxxxx -> 09xxxxxxxxx
 	if ( strlen( $mobile ) === 10 && substr( $mobile, 0, 1 ) === '9' )   $mobile = '0' . $mobile;
 	if ( strlen( $mobile ) === 12 && substr( $mobile, 0, 2 ) === '98' ) $mobile = '0' . substr( $mobile, 2 );
 	if ( strlen( $mobile ) === 13 && substr( $mobile, 0, 3 ) === '+98') $mobile = '0' . substr( $mobile, 3 );
@@ -125,16 +148,15 @@ function eligius_register_handler( WP_REST_Request $req ) {
 	) );
 
 	if ( is_wp_error( $user_id ) ) {
-		return new WP_Error( 'eligius_insert_failed',
-			$user_id->get_error_message(),
-			array( 'status' => 400 ) );
+		return new WP_Error( 'eligius_insert_failed', $user_id->get_error_message(), array( 'status' => 400 ) );
 	}
 
-	update_user_meta( $user_id, 'mobile', $mobile );
+	// Standard WP fields + compatibility meta for site plugins:
+	update_user_meta( $user_id, 'mobile', $mobile );            // our canonical key
+	update_user_meta( $user_id, 'billing_phone', $mobile );     // WooCommerce convention
 	update_user_meta( $user_id, 'national_code', $national_code );
 	update_user_meta( $user_id, 'registered_via', 'eligius-app' );
 
-	// Sends the standard "your account is ready / set password" style notification email.
 	wp_new_user_notification( $user_id, null, 'user' );
 
 	return rest_ensure_response( array(

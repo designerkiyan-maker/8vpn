@@ -255,6 +255,12 @@ object AuthStore {
                 val code = con.responseCode
                 val body = (if (code in 200..299) con.inputStream else con.errorStream)
                     ?.bufferedReader()?.use { it.readText() } ?: ""
+                if (body.contains("rest_no_route")) {
+                    // The server/eligius-register.php mu-plugin is not installed on the host yet.
+                    throw AuthException(
+                        "Registration service is not ready. / سرویس ثبت‌نام هنوز روی سرور فعال نیست."
+                    )
+                }
                 val j = JSONObject(body)
                 if (code != 200) {
                     throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
