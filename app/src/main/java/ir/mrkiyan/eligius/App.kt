@@ -7,5 +7,6 @@ class App : Application() {
         super.onCreate()
         SettingsStore.init(this)
         AuthStore.init(this)
+        Engine.init(this)
     }
 }

@@ -82,6 +82,14 @@ private fun fmtRate(b: Long): String = when {
     else -> "$b B/s"
 }
 
+private fun fmtBytes(b: Long): String = when {
+    b < 0 -> "—"
+    b >= 1_073_741_824 -> String.format(Locale.US, "%.2f GB", b / 1_073_741_824.0)
+    b >= 1_048_576 -> String.format(Locale.US, "%.1f MB", b / 1_048_576.0)
+    b >= 1024 -> String.format(Locale.US, "%.1f KB", b / 1024.0)
+    else -> "$b B"
+}
+
 @Composable
 fun HomeScreen(openLogs: () -> Unit) {
     val ctx = LocalContext.current
@@ -94,6 +102,9 @@ fun HomeScreen(openLogs: () -> Unit) {
     val exit by Engine.exitInfo.collectAsStateWithLifecycle()
     val exitCc by Engine.exitCountry.collectAsStateWithLifecycle()
     val speed by Engine.speedBps.collectAsStateWithLifecycle()
+    val totalRx by Engine.totalRx.collectAsStateWithLifecycle()
+    val totalTx by Engine.totalTx.collectAsStateWithLifecycle()
+    val lastSession by Engine.lastSession.collectAsStateWithLifecycle()
 
     val idle = st.phase == Phase.IDLE
     val scope = rememberCoroutineScope()
@@ -129,6 +140,14 @@ fun HomeScreen(openLogs: () -> Unit) {
         else -> x.busy
     }
     val live = st.phase == Phase.CONNECTED
+
+    var liveDurationMs by remember { mutableStateOf(0L) }
+    LaunchedEffect(live) {
+        while (live) {
+            Engine.sessionStartWallMs?.let { liveDurationMs = System.currentTimeMillis() - it }
+            kotlinx.coroutines.delay(1000)
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -234,16 +253,15 @@ fun HomeScreen(openLogs: () -> Unit) {
             }
         }
 
-        // ---- Last Connection Info Card
-        if (live || st.phase == Phase.RECONNECTING || st.phase == Phase.CONNECTING) {
-            Spacer(Modifier.height(16.dp))
-            LastConnectionCard(
-                live = live,
-                download = rx,
-                upload = tx,
-                speed = speed
-            )
-        }
+        // ---- Last / Current Connection Info Card (persists after disconnect)
+        Spacer(Modifier.height(16.dp))
+        LastConnectionCard(
+            live = live && !paused,
+            durationMs = if (live) liveDurationMs else lastSession?.durationMs ?: 0L,
+            downloadBytes = if (live) totalRx else lastSession?.rxBytes ?: 0L,
+            uploadBytes = if (live) totalTx else lastSession?.txBytes ?: 0L,
+            speedBps = if (live) (speed ?: 0L) else lastSession?.avgSpeedBps ?: 0L
+        )
 
         Spacer(Modifier.height(96.dp))
     }
@@ -408,9 +426,10 @@ private fun formatDuration(millis: Long): String {
 @Composable
 private fun LastConnectionCard(
     live: Boolean,
-    download: Long,
-    upload: Long,
-    speed: Long?
+    durationMs: Long,
+    downloadBytes: Long,
+    uploadBytes: Long,
+    speedBps: Long
 ) {
     val c = MaterialTheme.colorScheme
     val x = LocalExtra.current
@@ -434,25 +453,25 @@ private fun LastConnectionCard(
             ) {
                 InfoColumn(
                     label = stringResource(R.string.duration),
-                    value = stringResource(R.string.calculating), // TODO: track actual duration
+                    value = formatDuration(durationMs),
                     color = x.a,
                     modifier = Modifier.weight(1f)
                 )
                 InfoColumn(
                     label = stringResource(R.string.download),
-                    value = fmtRate(download) + "/s",
+                    value = fmtBytes(downloadBytes),
                     color = c.primary,
                     modifier = Modifier.weight(1f)
                 )
                 InfoColumn(
                     label = stringResource(R.string.upload),
-                    value = fmtRate(upload) + "/s",
+                    value = fmtBytes(uploadBytes),
                     color = c.secondary,
                     modifier = Modifier.weight(1f)
                 )
                 InfoColumn(
                     label = stringResource(R.string.speed),
-                    value = speed?.let { fmtRate(it) } ?: "—",
+                    value = if (speedBps > 0) fmtRate(speedBps) else "—",
                     color = c.tertiary,
                     modifier = Modifier.weight(1f)
                 )

@@ -1,5 +1,7 @@
 package ir.mrkiyan.eligius
 
+import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class Phase { IDLE, CONNECTING, CONNECTED, RECONNECTING, STOPPING }
@@ -8,6 +10,15 @@ data class Status(val phase: Phase = Phase.IDLE, val attempt: Int = 0, val error
 
 /** One-second throughput sample (bytes/s) for the home screen graph. */
 data class TrafficSample(val rx: Long, val tx: Long)
+
+/** Persisted summary of the last finished session, shown on the home screen. */
+data class LastSession(
+    val durationMs: Long,
+    val rxBytes: Long,
+    val txBytes: Long,
+    val avgSpeedBps: Long,
+    val endedAt: Long,
+)
 
 /** Process-wide connection state shared by the service, the tile and the UI. */
 object Engine {
@@ -28,6 +39,69 @@ object Engine {
     /** Last minute of throughput samples, oldest first; the home screen graph draws it. */
     val traffic = MutableStateFlow<List<TrafficSample>>(emptyList())
 
+    /** Wall-clock start of the current session (null = not counting). Survives reconnects. */
+    var sessionStartWallMs: Long? = null
+    /** Accumulated session totals in bytes (reset when a new session starts). */
+    val totalRx = MutableStateFlow(0L)
+    val totalTx = MutableStateFlow(0L)
+    /** Persisted summary of the previous session (survives disconnects and app restarts). */
+    val lastSession = MutableStateFlow<LastSession?>(null)
+
+    private var statsPrefs: SharedPreferences? = null
+
+    fun init(ctx: Context) {
+        if (statsPrefs != null) return
+        statsPrefs = ctx.applicationContext.getSharedPreferences("lastsession", Context.MODE_PRIVATE)
+        val p = statsPrefs!!
+        if (p.getLong("endedAt", 0L) > 0) {
+            lastSession.value = LastSession(
+                durationMs = p.getLong("durationMs", 0L),
+                rxBytes = p.getLong("rxBytes", 0L),
+                txBytes = p.getLong("txBytes", 0L),
+                avgSpeedBps = p.getLong("avgSpeedBps", 0L),
+                endedAt = p.getLong("endedAt", 0L),
+            )
+        }
+    }
+
+    /** Called once per service run when the tunnel first reports CONNECTED. */
+    fun markSessionStart() {
+        if (sessionStartWallMs == null) {
+            sessionStartWallMs = System.currentTimeMillis()
+            totalRx.value = 0
+            totalTx.value = 0
+        }
+    }
+
+    /** Persists the finished session so the home card keeps showing it after disconnect. */
+    fun saveLastSession() {
+        val start = sessionStartWallMs ?: return
+        val dur = System.currentTimeMillis() - start
+        sessionStartWallMs = null
+        if (dur <= 0) return
+        val rx = totalRx.value
+        val tx = totalTx.value
+        val avg = if (dur > 0) (rx + tx) * 1000 / dur else 0L
+        val ls = LastSession(durationMs = dur, rxBytes = rx, txBytes = tx, avgSpeedBps = avg, endedAt = System.currentTimeMillis())
+        lastSession.value = ls
+        statsPrefs?.edit()
+            ?.putLong("durationMs", ls.durationMs)
+            ?.putLong("rxBytes", ls.rxBytes)
+            ?.putLong("txBytes", ls.txBytes)
+            ?.putLong("avgSpeedBps", ls.avgSpeedBps)
+            ?.putLong("endedAt", ls.endedAt)
+            ?.apply()
+    }
+
+    /** Appends one sample, keeps the graph window and accumulates session totals. */
+    fun pushTraffic(rx: Long, tx: Long) {
+        val r = rx.coerceAtLeast(0)
+        val t = tx.coerceAtLeast(0)
+        totalRx.value += r
+        totalTx.value += t
+        traffic.value = (traffic.value + TrafficSample(r, t)).takeLast(TRAFFIC_WINDOW)
+    }
+
     private val ansi = Regex("\u001B\\[[0-9;]*[A-Za-z]")
 
     fun log(line: String) {
@@ -35,12 +109,6 @@ object Engine {
         if (clean.isEmpty()) return
         val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
         logs.value = (logs.value + "$stamp  $clean").takeLast(400)
-    }
-
-    /** Appends one sample and keeps only the newest [TRAFFIC_WINDOW] seconds. */
-    fun pushTraffic(rx: Long, tx: Long) {
-        traffic.value = (traffic.value + TrafficSample(rx.coerceAtLeast(0), tx.coerceAtLeast(0)))
-            .takeLast(TRAFFIC_WINDOW)
     }
 
     fun resetLive() {

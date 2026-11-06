@@ -146,6 +146,7 @@
     <string name="profile_member_since">عضو از</string>
     <string name="profile_role">نقش</string>
     <string name="locked_title">اتصال فعال است</string>
+    <string name="next_btn">بعدی</string>
 
     <string name="notif_channel">وضعیت VPN</string>
     <string name="endpoint">اندپوینت سفارشی</string>

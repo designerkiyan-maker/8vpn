@@ -177,6 +177,7 @@ class TunnelService : VpnService() {
 
     private suspend fun finish(error: String?) {
         teardown()
+        Engine.saveLastSession()   // keep duration/totals on the home card after disconnect
         Engine.resetLive()
         Engine.paused.value = false
         Engine.status.value = Status(Phase.IDLE, error = error)
@@ -237,6 +238,7 @@ class TunnelService : VpnService() {
                 connectedAt = SystemClock.elapsedRealtime()
                 lastRxAt = connectedAt
                 Engine.status.value = Status(Phase.CONNECTED)
+                Engine.markSessionStart()
                 Engine.log("Connected via ${s.activeLabel()}")
                 scope.launch { fetchExit(port) }
                 val speedJob = scope.launch {
