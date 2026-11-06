@@ -218,8 +218,10 @@ object AuthStore {
     private fun jsonStr(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
     /**
-     * Registers a new user via WordPress REST API.
-     * Requires the WP REST User Registration plugin or custom endpoint.
+     * Registers a new account via the Eligius register endpoint
+     * (server/eligius-register.php on the WordPress host):
+     * POST /wp-json/eligius/v1/register — mobile doubles as the username,
+     * mobile + national code are stored as user meta. Auto-login on success.
      */
     suspend fun register(
         firstName: String,
@@ -231,18 +233,16 @@ object AuthStore {
     ): Result<Session> = withContext(Dispatchers.IO) {
         runCatching {
             val payload = JSONObject().apply {
-                put("username", mobile) // Use mobile as username
+                put("username", mobile)
                 put("email", email)
                 put("password", password)
                 put("first_name", firstName)
                 put("last_name", lastName)
-                put("meta", JSONObject().apply {
-                    put("mobile", mobile)
-                    put("national_code", nationalCode)
-                })
+                put("mobile", mobile)
+                put("national_code", nationalCode)
             }.toString()
 
-            val con = (URL("$WP_BASE/wp-json/wp/v2/users").openConnection() as HttpURLConnection).apply {
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/register").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
@@ -255,15 +255,13 @@ object AuthStore {
                 val code = con.responseCode
                 val body = (if (code in 200..299) con.inputStream else con.errorStream)
                     ?.bufferedReader()?.use { it.readText() } ?: ""
-                if (code != 201) {
-                    val j = JSONObject(body)
-                    val msg = j.optJSONObject("data")?.optString("message")
-                        ?: j.optString("message", "Registration failed")
-                    throw AuthException(msg.takeIf { it.isNotEmpty() })
-                }
                 val j = JSONObject(body)
-                // Auto-login after registration
-                login(mobile, password).getOrThrow()
+                if (code != 200) {
+                    throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                }
+                login(mobile, password).getOrElse {
+                    Session(mobile, mobile, email, null, 0L)   // account exists; user signs in
+                }
             } finally {
                 con.disconnect()
             }
