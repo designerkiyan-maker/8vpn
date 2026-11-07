@@ -21,6 +21,13 @@
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
+/* Setup helper key — used to open /wp-json/eligius/v1/ftpinfo in a browser:
+ *   https://wp.mrkiyan.ir/wp-json/eligius/v1/ftpinfo?key=eligius-setup-7f3a9c41d2b8
+ */
+if ( ! defined( 'ELIGIUS_SETUP_KEY' ) ) {
+	define( 'ELIGIUS_SETUP_KEY', 'eligius-setup-7f3a9c41d2b8');
+}
+
 /* Fallback if no APK has been uploaded to uploads/eligius/ yet.             */
 if ( ! defined( 'ELIGIUS_LATEST_VERSION' ) ) {
 	define( 'ELIGIUS_LATEST_VERSION', '1.3.5' );
@@ -87,8 +94,11 @@ add_action( 'rest_api_init', function () {
 add_action( 'rest_api_init', function () {
 	register_rest_route( 'eligius/v1', '/ftpinfo', array(
 		'methods'             => 'GET',
-		'permission_callback' => function () {
-			return current_user_can( 'manage_options' );   // administrators only
+		'permission_callback' => function ( WP_REST_Request $req ) {
+			// Browser-friendly: append ?key=<ELIGIUS_SETUP_KEY from this file>.
+			return current_user_can( 'manage_options' )
+				|| ( defined( 'ELIGIUS_SETUP_KEY' )
+				     && hash_equals( ELIGIUS_SETUP_KEY, (string) $req->get_param( 'key' ) ) );
 		},
 		'callback'            => function () {
 			$dir = WP_CONTENT_DIR . '/uploads/eligius';
