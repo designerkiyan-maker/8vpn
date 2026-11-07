@@ -249,6 +249,19 @@ jobs:
           cp *universal*.apk   ../../../../../out/Eligius-universal.apk
           ls -l ../../../../../out
 
+      - name: Deploy APK to update server (wp.mrkiyan.ir)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          FTP_HOST: ${{ secrets.ELIGIUS_FTP_HOST }}
+          FTP_USER: ${{ secrets.ELIGIUS_FTP_USER }}
+          FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
+          FTP_PATH: ${{ secrets.ELIGIUS_FTP_PATH }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Uploading Eligius-$VERSION-universal.apk to ftp://$FTP_HOST$FTP_PATH"
+          curl -T "out/Eligius-universal.apk"             "ftp://$FTP_HOST$FTP_PATH/Eligius-$VERSION-universal.apk"             --user "$FTP_USER:$FTP_PASS" --ftp-create-dirs --retry 3
+          echo "Deployed. The /version endpoint auto-detects the newest APK by filename."
+
       - uses: actions/upload-artifact@v4
         with:
           name: Eligius-apks

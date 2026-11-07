@@ -21,14 +21,38 @@
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-/* ✎ 1) Latest released app version (compare numerically against the app).   */
+/* Fallback if no APK has been uploaded to uploads/eligius/ yet.             */
 if ( ! defined( 'ELIGIUS_LATEST_VERSION' ) ) {
-	define( 'ELIGIUS_LATEST_VERSION', '1.3.4' );
+	define( 'ELIGIUS_LATEST_VERSION', '1.3.5' );
 }
-/* ✎ 2) Direct URL of the released APK. Upload the APK to your site —        */
-/*      recommended: wp-content/uploads/eligius/Eligius-universal.apk        */
 if ( ! defined( 'ELIGIUS_LATEST_APK_URL' ) ) {
 	define( 'ELIGIUS_LATEST_APK_URL', 'https://wp.mrkiyan.ir/wp-content/uploads/eligius/Eligius-universal.apk' );
+}
+
+/**
+ * Finds the newest uploaded build: scans wp-content/uploads/eligius/ for
+ * Eligius-<version>-universal.apk (uploaded automatically by GitHub Actions
+ * after every tag build) and returns the highest version found.
+ */
+function eligius_latest_apk() {
+	$dir = WP_CONTENT_DIR . '/uploads/eligius';
+	if ( ! is_dir( $dir ) ) return null;
+	$best_version = null;
+	$best_name    = null;
+	foreach ( glob( $dir . '/Eligius-*.apk' ) ?: array() as $file ) {
+		$name = basename( $file );
+		if ( preg_match( '/^Eligius-(\d+(?:\.\d+){1,3})-universal\.apk$/i', $name, $m ) ) {
+			if ( $best_version === null || version_compare( $m[1], $best_version, '>' ) ) {
+				$best_version = $m[1];
+				$best_name    = $name;
+			}
+		}
+	}
+	if ( $best_version === null ) return null;
+	return array(
+		'version' => $best_version,
+		'apk_url' => content_url( 'uploads/eligius/' . $best_name ),
+	);
 }
 
 /* ──────────────────────────────  version  ────────────────────────────── */
@@ -38,6 +62,14 @@ add_action( 'rest_api_init', function () {
 		'methods'             => 'GET',
 		'permission_callback' => '__return_true',
 		'callback'            => function () {
+			$auto = eligius_latest_apk();
+			if ( $auto !== null ) {
+				return rest_ensure_response( array(
+					'version' => $auto['version'],
+					'apk_url' => $auto['apk_url'],
+				) );
+			}
+			// Fallback: no APK uploaded yet — report the constant below.
 			return rest_ensure_response( array(
 				'version' => ELIGIUS_LATEST_VERSION,
 				'apk_url' => ELIGIUS_LATEST_APK_URL,
