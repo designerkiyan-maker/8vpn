@@ -78,6 +78,32 @@ add_action( 'rest_api_init', function () {
 	) );
 } );
 
+/* ────────────────────────  ftpinfo (setup helper)  ────────────────────── */
+/* Open https://wp.mrkiyan.ir/wp-json/eligius/v1/ftpinfo in your browser
+ * WHILE LOGGED INTO wp-admin as administrator. It prints the exact server
+ * path of the eligius uploads folder — use its tail (relative to your FTP
+ * login directory) as the ELIGIUS_FTP_PATH secret in GitHub.               */
+
+add_action( 'rest_api_init', function () {
+	register_rest_route( 'eligius/v1', '/ftpinfo', array(
+		'methods'             => 'GET',
+		'permission_callback' => function () {
+			return current_user_can( 'manage_options' );   // administrators only
+		},
+		'callback'            => function () {
+			$dir = WP_CONTENT_DIR . '/uploads/eligius';
+			if ( ! is_dir( $dir ) ) wp_mkdir_p( $dir );
+			return rest_ensure_response( array(
+				'absolute_server_path' => $dir,
+				'dir_exists'           => is_dir( $dir ),
+				'writable'             => is_writable( $dir ),
+				'apks_found'           => array_map( 'basename', glob( $dir . '/*.apk' ) ?: array() ),
+				'hint'                 => 'FTP_PATH = this absolute path, relative to where your FTP client starts.',
+			) );
+		},
+	) );
+} );
+
 /* ──────────────────────────────  register  ───────────────────────────── */
 
 add_action( 'rest_api_init', function () {
