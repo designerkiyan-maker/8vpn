@@ -30,7 +30,7 @@ if ( ! defined( 'ELIGIUS_SETUP_KEY' ) ) {
 
 /* Fallback if no APK has been uploaded to uploads/eligius/ yet.             */
 if ( ! defined( 'ELIGIUS_LATEST_VERSION' ) ) {
-	define( 'ELIGIUS_LATEST_VERSION', '1.3.5' );
+	define( 'ELIGIUS_LATEST_VERSION', '1.3.7' );
 }
 if ( ! defined( 'ELIGIUS_LATEST_APK_URL' ) ) {
 	define( 'ELIGIUS_LATEST_APK_URL', 'https://wp.mrkiyan.ir/wp-content/uploads/eligius/Eligius-universal.apk' );
