@@ -67,7 +67,10 @@ function eligius_otp_mobile_e164( $mobile ) {
 	return '+98' . substr( $mobile, 1 );
 }
 
-/** Sends the OTP via IPPanel Edge: pattern SMS if configured, else plain webservice SMS. */
+/** Sends the OTP via IPPanel Edge: pattern SMS if configured, else plain webservice SMS.
+ *  Endpoint/shape VERIFIED live against edge.ippanel.com (2026-11-08):
+ *  POST https://edge.ippanel.com/v1/api/send — webservice keeps recipients INSIDE
+ *  params; pattern wants recipients at TOP level (single recipient) + flat params. */
 function eligius_otp_send_sms( $mobile, $code ) {
 	$key  = ELIGIUS_IPPANEL_KEY;
 	$from = ELIGIUS_IPPANEL_FROM;
@@ -76,19 +79,23 @@ function eligius_otp_send_sms( $mobile, $code ) {
 			'SMS gateway is not configured. / درگاه پیامک تنظیم نشده است.',
 			array( 'status' => 500 ) );
 	}
-	$body = array(
-		'from_number' => $from,
-		'params'      => array( 'recipients' => array( eligius_otp_mobile_e164( $mobile ) ) ),
-	);
 	if ( ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
-		$body['sending_type'] = 'pattern';
-		$body['code']         = ELIGIUS_IPPANEL_OTP_PATTERN;
-		$body['params']       = array( 'code' => $code );
+		$body = array(
+			'sending_type' => 'pattern',
+			'from_number'  => $from,
+			'code'         => ELIGIUS_IPPANEL_OTP_PATTERN,
+			'recipients'   => array( eligius_otp_mobile_e164( $mobile ) ),
+			'params'       => array( 'code' => $code ),
+		);
 	} else {
-		$body['sending_type'] = 'webservice';
-		$body['message']      = 'کد تایید الیژیوس: ' . $code;
+		$body = array(
+			'sending_type' => 'webservice',
+			'from_number'  => $from,
+			'message'      => 'کد تایید الیژیوس: ' . $code,
+			'params'       => array( 'recipients' => array( eligius_otp_mobile_e164( $mobile ) ) ),
+		);
 	}
-	$res = wp_remote_post( 'https://edge.ippanel.com/api/send', array(
+	$res = wp_remote_post( 'https://edge.ippanel.com/v1/api/send', array(
 		'timeout' => 15,
 		'headers' => array(
 			'Authorization' => $key,
