@@ -143,11 +143,19 @@ fun AccountScreen(back: () -> Unit) {
     val session by AuthStore.flow.collectAsStateWithLifecycle()
     val profile by AuthStore.profile.collectAsStateWithLifecycle()
     val usage by Engine.usage.collectAsStateWithLifecycle()
+    val usageServer by AuthStore.usageServer.collectAsStateWithLifecycle()
     val totalRxLive by Engine.totalRx.collectAsStateWithLifecycle()
     val totalTxLive by Engine.totalTx.collectAsStateWithLifecycle()
     val st by Engine.status.collectAsStateWithLifecycle()
     val liveNow = st.phase == Phase.CONNECTED
     val liveDur = Engine.sessionStartWallMs?.let { System.currentTimeMillis() - it } ?: 0L
+    LaunchedEffect(session?.token) { if (session?.token != null) AuthStore.fetchUsage() }
+    // Lifetime is server-authoritative when available (survives updates/reinstalls);
+    // local Engine.usage is the fallback for form-login sessions.
+    val lRx = usageServer?.rxBytes ?: usage.rxBytes
+    val lTx = usageServer?.txBytes ?: usage.txBytes
+    val lDur = usageServer?.durationMs ?: usage.durationMs
+    val lSessions = usageServer?.sessions ?: usage.sessions
     LaunchedEffect(session?.token) { if (session?.token != null) AuthStore.fetchProfile() }
 
     fun performUpdate(info: Updater.Info) {
@@ -220,10 +228,10 @@ fun AccountScreen(back: () -> Unit) {
             AppCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(stringResource(R.string.usage_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = c.primary)
-                    InfoRow(stringResource(R.string.download), fmtBytes(usage.rxBytes + (if (liveNow) totalRxLive else 0L)))
-                    InfoRow(stringResource(R.string.upload), fmtBytes(usage.txBytes + (if (liveNow) totalTxLive else 0L)))
-                    InfoRow(stringResource(R.string.duration), formatDuration(usage.durationMs + (if (liveNow) liveDur else 0L)))
-                    InfoRow(stringResource(R.string.usage_sessions), "${usage.sessions + (if (liveNow) 1 else 0)}")
+                    InfoRow(stringResource(R.string.download), fmtBytes(lRx + (if (liveNow) totalRxLive else 0L)))
+                    InfoRow(stringResource(R.string.upload), fmtBytes(lTx + (if (liveNow) totalTxLive else 0L)))
+                    InfoRow(stringResource(R.string.duration), formatDuration(lDur + (if (liveNow) liveDur else 0L)))
+                    InfoRow(stringResource(R.string.usage_sessions), "${lSessions + (if (liveNow) 1 else 0)}")
                 }
             }
             if (Updater.ENABLED) {

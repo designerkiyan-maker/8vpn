@@ -86,11 +86,11 @@ object Engine {
     }
 
     /** Persists the finished session so the home card keeps showing it after disconnect. */
-    fun saveLastSession() {
-        val start = sessionStartWallMs ?: return
+    fun saveLastSession(): LastSession? {
+        val start = sessionStartWallMs ?: return null
         val dur = System.currentTimeMillis() - start
         sessionStartWallMs = null
-        if (dur <= 0) return
+        if (dur <= 0) return null
         val rx = totalRx.value
         val tx = totalTx.value
         val avg = if (dur > 0) (rx + tx) * 1000 / dur else 0L
@@ -104,6 +104,7 @@ object Engine {
             ?.putLong("endedAt", ls.endedAt)
             ?.apply()
         accumulateUsage(rx, tx, dur)
+        return ls
     }
 
     /** Adds one finished session to the lifetime usage of the signed-in account. */

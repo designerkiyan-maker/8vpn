@@ -178,8 +178,15 @@ class TunnelService : VpnService() {
 
     private suspend fun finish(error: String?) {
         teardown()
-        Engine.saveLastSession()   // keep duration/totals on the home card after disconnect
+        val saved = Engine.saveLastSession()   // keep duration/totals on the home card after disconnect
         Engine.resetLive()
+        // Server-side lifetime usage: report the finished session for the signed-in
+        // account (JWT sessions only; form-login sessions stay local). Best effort.
+        if (saved != null && AuthStore.flow.value?.token != null) {
+            scope.launch {
+                runCatching { AuthStore.reportUsage(saved.rxBytes, saved.txBytes, saved.durationMs) }
+            }
+        }
         Engine.paused.value = false
         Engine.status.value = Status(Phase.IDLE, error = error)
         foreground = false

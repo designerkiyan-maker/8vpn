@@ -114,6 +114,60 @@ add_action( 'rest_api_init', function () {
 	) );
 } );
 
+/* ──────────────────────────────  usage  ────────────────────────────── */
+/* Lifetime per-user traffic/duration, stored in the WordPress database.
+ * The app reports each finished session (POST, JWT Bearer) and reads the
+ * accumulated totals (GET). Survives app updates and reinstalls.        */
+
+add_action( 'rest_api_init', function () {
+	register_rest_route( 'eligius/v1', '/usage', array(
+		array(
+			'methods'             => 'GET',
+			'permission_callback' => 'is_user_logged_in',   // valid JWT Bearer = logged in
+			'callback'            => 'eligius_usage_get',
+		),
+		array(
+			'methods'             => 'POST',
+			'permission_callback' => 'is_user_logged_in',
+			'callback'            => 'eligius_usage_post',
+			'args'                => array(
+				'rx'       => array( 'required' => true, 'type' => 'integer' ),
+				'tx'       => array( 'required' => true, 'type' => 'integer' ),
+				'duration' => array( 'required' => true, 'type' => 'integer' ),
+			),
+		),
+	) );
+} );
+
+/** Sanity cap per report: 30 days of duration, 1 TB per direction. */
+function eligius_usage_cap( $v, $max ) {
+	return min( max( 0, (int) $v ), $max );
+}
+
+function eligius_usage_get() {
+	$uid = get_current_user_id();
+	return rest_ensure_response( array(
+		'rx_bytes'    => (int) get_user_meta( $uid, 'eligius_total_rx', true ),
+		'tx_bytes'    => (int) get_user_meta( $uid, 'eligius_total_tx', true ),
+		'duration_ms' => (int) get_user_meta( $uid, 'eligius_total_duration', true ),
+		'sessions'    => (int) get_user_meta( $uid, 'eligius_sessions', true ),
+	) );
+}
+
+function eligius_usage_post( WP_REST_Request $req ) {
+	$uid = get_current_user_id();
+	$rx  = eligius_usage_cap( $req->get_param( 'rx' ), 2 ** 40 );              // 1 TB
+	$tx  = eligius_usage_cap( $req->get_param( 'tx' ), 2 ** 40 );
+	$dur = eligius_usage_cap( $req->get_param( 'duration' ), 30 * 86400 * 1000 ); // 30 days
+
+	update_user_meta( $uid, 'eligius_total_rx', (int) get_user_meta( $uid, 'eligius_total_rx', true ) + $rx );
+	update_user_meta( $uid, 'eligius_total_tx', (int) get_user_meta( $uid, 'eligius_total_tx', true ) + $tx );
+	update_user_meta( $uid, 'eligius_total_duration', (int) get_user_meta( $uid, 'eligius_total_duration', true ) + $dur );
+	update_user_meta( $uid, 'eligius_sessions', (int) get_user_meta( $uid, 'eligius_sessions', true ) + 1 );
+
+	return eligius_usage_get();
+}
+
 /* ──────────────────────────────  register  ───────────────────────────── */
 
 add_action( 'rest_api_init', function () {

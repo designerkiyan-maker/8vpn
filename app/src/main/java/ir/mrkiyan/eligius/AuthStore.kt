@@ -36,6 +36,9 @@ object AuthStore {
         val exp: Long,
     )
 
+    /** Lifetime usage as stored in the WordPress database (server-authoritative). */
+    data class UsageServer(val rxBytes: Long, val txBytes: Long, val durationMs: Long, val sessions: Int)
+
     /** Full profile as reported by /wp-json/wp/v2/users/me (null = not fetched / form session). */
     data class Profile(
         val id: Long,
@@ -48,6 +51,7 @@ object AuthStore {
 
     val flow = MutableStateFlow<Session?>(null)
     val profile = MutableStateFlow<Profile?>(null)
+    val usageServer = MutableStateFlow<UsageServer?>(null)
     val isLoggedIn: Boolean get() = flow.value != null
     val registerUrl: String get() = "$WP_BASE/wp-login.php?action=register"
 
@@ -108,6 +112,72 @@ object AuthStore {
             }
         }
     }
+
+    /** Lifetime usage of the signed-in user, from the WordPress database (JWT session only). */
+    suspend fun fetchUsage(): Result<UsageServer> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = flow.value?.token ?: error("no JWT session")
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/usage").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("User-Agent", "eligius-android")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                if (con.responseCode != 200) error("HTTP ${con.responseCode}")
+                val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
+                UsageServer(
+                    rxBytes = j.optLong("rx_bytes"),
+                    txBytes = j.optLong("tx_bytes"),
+                    durationMs = j.optLong("duration_ms"),
+                    sessions = j.optInt("sessions"),
+                ).also { usageServer.value = it }
+            } finally {
+                con.disconnect()
+            }
+        }
+    }
+
+    /** Reports one finished session; the server accumulates it into lifetime usage. */
+    suspend fun reportUsage(rx: Long, tx: Long, durationMs: Long): Result<UsageServer> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val token = flow.value?.token ?: error("no JWT session")
+                val payload = JSONObject()
+                    .put("rx", rx.coerceAtLeast(0))
+                    .put("tx", tx.coerceAtLeast(0))
+                    .put("duration", durationMs.coerceAtLeast(0))
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/usage").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Authorization", "Bearer $token")
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    val code = con.responseCode
+                    val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                    val j = JSONObject(body)
+                    if (code != 200) {
+                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                    }
+                    UsageServer(
+                        rxBytes = j.optLong("rx_bytes"),
+                        txBytes = j.optLong("tx_bytes"),
+                        durationMs = j.optLong("duration_ms"),
+                        sessions = j.optInt("sessions"),
+                    ).also { usageServer.value = it }
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
 
     suspend fun login(user: String, pass: String): Result<Session> = withContext(Dispatchers.IO) {
         runCatching {
