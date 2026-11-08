@@ -257,6 +257,10 @@ jobs:
           FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
           FTP_PATH: ${{ secrets.ELIGIUS_FTP_PATH }}
         run: |
+          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASS" ] || [ -z "$FTP_PATH" ]; then
+            echo "::notice::ELIGIUS_FTP_* secrets not set — skipping deploy to the update server."
+            exit 0
+          fi
           VERSION="${GITHUB_REF_NAME#v}"
           echo "Uploading Eligius-$VERSION-universal.apk to ftp://$FTP_HOST$FTP_PATH"
           curl -T "out/Eligius-universal.apk"             "ftp://$FTP_HOST$FTP_PATH/Eligius-$VERSION-universal.apk"             --user "$FTP_USER:$FTP_PASS" --ftp-create-dirs --retry 3
