@@ -262,8 +262,10 @@ jobs:
             exit 0
           fi
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Uploading Eligius-$VERSION-universal.apk to ftp://$FTP_HOST$FTP_PATH"
-          curl -T "out/Eligius-universal.apk"             "ftp://$FTP_HOST$FTP_PATH/Eligius-$VERSION-universal.apk"             --user "$FTP_USER:$FTP_PASS" --ftp-create-dirs --retry 3
+          for VARIANT in universal arm64-v8a armeabi-v7a; do
+            echo "Uploading Eligius-$VERSION-$VARIANT.apk to ftp://$FTP_HOST$FTP_PATH"
+            curl -T "out/Eligius-$VARIANT.apk"               "ftp://$FTP_HOST$FTP_PATH/Eligius-$VERSION-$VARIANT.apk"               --user "$FTP_USER:$FTP_PASS" --ftp-create-dirs --retry 3
+          done
           echo "Deployed. The /version endpoint auto-detects the newest APK by filename."
 
       - uses: actions/upload-artifact@v4

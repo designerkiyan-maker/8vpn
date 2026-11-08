@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eligius VPN — دانلود</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+  body { min-height: 100vh; background: radial-gradient(1200px 600px at 50% -10%, #2a1650 0%, #0d0a1a 55%) #0d0a1a; color: #ece7f8; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { width: 100%; max-width: 460px; background: rgba(255,255,255,0.04); border: 1px solid rgba(176,124,255,0.25); border-radius: 26px; padding: 34px 26px; text-align: center; }
+  .mark { width: 84px; height: 84px; margin: 0 auto 14px; border-radius: 26px; display: flex; align-items: center; justify-content: center; font-size: 46px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #7e6bff, #b07cff); box-shadow: 0 0 50px rgba(176,124,255,0.5); }
+  h1 { font-size: 24px; margin-bottom: 4px; letter-spacing: 1px; }
+  .tag { color: #b3a8ce; font-size: 11px; margin-bottom: 20px; letter-spacing: 4px; }
+  .status { font-size: 14px; color: #b3a8ce; min-height: 44px; line-height: 1.7; margin-bottom: 12px; }
+  .status b { color: #b07cff; }
+  a.btn { display: block; margin: 10px 0; padding: 14px 16px; border-radius: 14px; text-decoration: none; font-weight: 600; font-size: 14px; color: #ece7f8; background: rgba(255,255,255,0.05); border: 1px solid rgba(176,124,255,0.3); }
+  a.btn.primary { background: linear-gradient(135deg, #7e6bff, #b07cff); color: #fff; border: none; box-shadow: 0 6px 24px rgba(176,124,255,0.35); }
+  .foot { margin-top: 20px; font-size: 11px; color: #6c5f93; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="mark">E</div>
+  <h1>ELIGIUS VPN</h1>
+  <div class="tag">BEYOND BOUNDARIES.</div>
+  <div class="status" id="status">در حال بررسی دستگاه شما…<br>Checking your device…</div>
+  <div id="links" style="display:none">
+    <a class="btn primary" id="auto" href="#">دانلود برای دستگاه من</a>
+    <a class="btn" href="#" id="l64">arm64-v8a — گوشی‌های مدرن</a>
+    <a class="btn" href="#" id="l7a">armeabi-v7a — گوشی‌های قدیمی</a>
+    <a class="btn" href="#" id="lun">Universal — همه‌ی دستگاه‌ها</a>
+  </div>
+  <div class="foot">نرم‌افزار آزاد تحت AGPL-3.0 · Free software under AGPL-3.0<br>بر پایه‌ی هسته‌ی Aether / Built on the Aether core</div>
+</div>
+<script>
+/* detection identical to docs/index.html — but serves APKs from THIS site */
+const API = '/wp-json/eligius/v1/version';
+const status = document.getElementById('status');
+const links = document.getElementById('links');
+const auto = document.getElementById('auto');
+let latestVersion = null;
+
+function setLinks(v) {
+  const base = '/wp-content/uploads/eligius/';
+  document.getElementById('l64').href = base + 'Eligius-' + v + '-arm64-v8a.apk';
+  document.getElementById('l7a').href = base + 'Eligius-' + v + '-armeabi-v7a.apk';
+  document.getElementById('lun').href = base + 'Eligius-' + v + '-universal.apk';
+  auto.href = base + 'Eligius-' + v + '-universal.apk';
+}
+
+function showPrimary(label, abi) {
+  auto.textContent = 'دانلود برای دستگاه من (' + label + ')';
+  status.innerHTML = 'تشخیص داده شد: <b>' + label + '</b> — آخرین نسخه: <b>' + (latestVersion || '') + '</b><br>' +
+    "Detected <b>" + label + "</b> — tap to download.";
+  links.style.display = 'block';
+}
+
+(async function () {
+  // newest version from the site itself
+  try {
+    const j = await fetch(API).then(r => r.json());
+    latestVersion = (j.version || '').trim();
+    setLinks(latestVersion);
+  } catch (e) { /* keep defaults */ }
+
+  if (!/android/i.test(navigator.userAgent)) {
+    showPrimary('', '');
+    status.innerHTML = 'دستگاه اندرویدی تشخیص داده نشد — نسخه‌ی مناسب را دستی انتخاب کنید:<br>Non-Android device — pick a build manually:';
+    links.style.display = 'block';
+    return;
+  }
+  try {
+    if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValue) {
+      const hd = await navigator.userAgentData.getHighEntropyValue(['architecture', 'bitness']);
+      const arch = (hd.architecture || '').toLowerCase();
+      const bits = hd.bitness || '';
+      if (arch === 'arm' && bits === '64') return showPrimary('arm64-v8a', 'arm64-v8a');
+      if (arch === 'arm' && bits === '32') return showPrimary('armeabi-v7a', 'armeabi-v7a');
+    }
+    const plat = navigator.platform || '';
+    if (/aarch64|armv8/i.test(plat)) return showPrimary('arm64-v8a', 'arm64-v8a');
+    if (/armv7|armv6/i.test(plat)) return showPrimary('armeabi-v7a', 'armeabi-v7a');
+  } catch (e) { /* fall through */ }
+  showPrimary('Universal', 'universal');
+})();
+</script>
+</body>
+</html>
