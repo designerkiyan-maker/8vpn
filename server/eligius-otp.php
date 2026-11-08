@@ -67,7 +67,9 @@ function eligius_otp_mobile_e164( $mobile ) {
 	return '+98' . substr( $mobile, 1 );
 }
 
-/** Sends the OTP via IPPanel Edge: pattern SMS if configured, else plain webservice SMS.
+/** Sends the OTP via IPPanel Edge: pattern SMS (fast lane) if configured, with
+ *  automatic fallback to plain webservice SMS if the pattern send ever fails
+ *  (e.g. pattern still pending approval) — the OTP must never be undeliverable.
  *  Endpoint/shape VERIFIED live against edge.ippanel.com (2026-11-08):
  *  POST https://edge.ippanel.com/v1/api/send — webservice keeps recipients INSIDE
  *  params; pattern wants recipients at TOP level (single recipient) + flat params. */
@@ -80,25 +82,30 @@ function eligius_otp_send_sms( $mobile, $code ) {
 			array( 'status' => 500 ) );
 	}
 	if ( ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
-		$body = array(
+		$via_pattern = eligius_otp_send_ippanel( array(
 			'sending_type' => 'pattern',
 			'from_number'  => $from,
 			'code'         => ELIGIUS_IPPANEL_OTP_PATTERN,
 			'recipients'   => array( eligius_otp_mobile_e164( $mobile ) ),
 			'params'       => array( 'code' => $code ),
-		);
-	} else {
-		$body = array(
-			'sending_type' => 'webservice',
-			'from_number'  => $from,
-			'message'      => 'کد تایید الیژیوس: ' . $code,
-			'params'       => array( 'recipients' => array( eligius_otp_mobile_e164( $mobile ) ) ),
-		);
+		) );
+		if ( ! is_wp_error( $via_pattern ) ) return true;   // fast lane delivered
+		// else fall through to the plain webservice send below.
 	}
+	return eligius_otp_send_ippanel( array(
+		'sending_type' => 'webservice',
+		'from_number'  => $from,
+		'message'      => 'کد تایید الیژیوس: ' . $code,
+		'params'       => array( 'recipients' => array( eligius_otp_mobile_e164( $mobile ) ) ),
+	) );
+}
+
+/** Low-level IPPanel Edge send: returns true or a WP_Error. */
+function eligius_otp_send_ippanel( $body ) {
 	$res = wp_remote_post( 'https://edge.ippanel.com/v1/api/send', array(
 		'timeout' => 15,
 		'headers' => array(
-			'Authorization' => $key,
+			'Authorization' => ELIGIUS_IPPANEL_KEY,
 			'Content-Type'  => 'application/json',
 		),
 		'body'    => wp_json_encode( $body ),
