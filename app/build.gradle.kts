@@ -12,8 +12,8 @@ android {
         applicationId = "ir.mrkiyan.eligius"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.3.8"
+        versionCode = 18
+        versionName = "1.3.9"
     }
 
     val ksPath = System.getenv("KEYSTORE_FILE")
