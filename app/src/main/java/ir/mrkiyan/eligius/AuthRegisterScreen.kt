@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,17 +46,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Two-step native registration wizard (no WebView):
+ * Three-step native registration wizard (no WebView):
  *   step 1 — نام، نام خانوادگی، کد ملی
- *   step 2 — ایمیل، شماره موبایل، رمز عبور + تکرار
- * Data is posted to the WordPress REST API via AuthStore.register().
+ *   step 2 — ایمیل، شماره موبایل، رمز عبور + تکرار → POST /register/otp-start
+ *   step 3 — کد تایید پیامک‌شده (۶ رقم)            → POST /register/otp-verify
+ * On success the app signs the user in automatically (AuthStore.login) and the
+ * session flow flips the router back to Home — same as the login screen.
  */
 @Composable
 fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
-    val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var step by remember { mutableIntStateOf(1) }
     var firstName by remember { mutableStateOf("") }
@@ -64,9 +68,12 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     var nationalCode by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var otp by remember { mutableStateOf("") }
+    var resendIn by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // stringResource is not callable inside onClick lambdas — hoist everything first.
     val fillAllFieldsMsg = stringResource(R.string.fill_all_fields)
     val passwordsMismatchMsg = stringResource(R.string.passwords_mismatch)
     val passwordTooShortMsg = stringResource(R.string.password_too_short)
@@ -74,13 +81,22 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     val invalidNationalCodeMsg = stringResource(R.string.invalid_national_code)
     val invalidEmailMsg = stringResource(R.string.invalid_email)
     val registerErrorMsg = stringResource(R.string.register_error)
-    val registerBtnText = stringResource(R.string.register_btn)
+    val otpErrorMsg = stringResource(R.string.otp_error)
+
+    // Resend countdown: ticks one second at a time back to zero.
+    LaunchedEffect(resendIn) {
+        if (resendIn > 0) {
+            delay(1_000)
+            resendIn -= 1
+        }
+    }
 
     fun goBack() {
-        if (step == 2) {
-            step = 1
-            error = null
-        } else onBack()
+        when (step) {
+            3 -> { step = 2; error = null }
+            2 -> { step = 1; error = null }
+            else -> onBack()
+        }
     }
     BackHandler(enabled = true) { goBack() }
 
@@ -99,6 +115,8 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
             StepDot(active = step >= 1, label = "۱")
             StepLine(filled = step >= 2)
             StepDot(active = step >= 2, label = "۲")
+            StepLine(filled = step >= 3)
+            StepDot(active = step >= 3, label = "۳")
         }
         Spacer(Modifier.height(20.dp))
         AppCard {
@@ -140,7 +158,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) { Text(stringResource(R.string.next_btn), fontWeight = FontWeight.SemiBold) }
-                } else {
+                } else if (step == 2) {
                     OutlinedTextField(
                         value = email, onValueChange = { email = it },
                         label = { Text(stringResource(R.string.email)) },
@@ -159,7 +177,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         value = password, onValueChange = { password = it },
                         label = { Text(stringResource(R.string.password)) },
                         singleLine = true, enabled = !busy,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -167,7 +185,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         value = confirmPassword, onValueChange = { confirmPassword = it },
                         label = { Text(stringResource(R.string.confirm_password)) },
                         singleLine = true, enabled = !busy,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -200,11 +218,18 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                             error = null
                             busy = true
                             scope.launch {
-                                AuthStore.register(firstName, lastName, email, mobile, nationalCode, password).fold(
-                                    onSuccess = { onLogin() },
-                                    onFailure = { e -> error = (e as? AuthException)?.uiMessage ?: registerErrorMsg }
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode).fold(
+                                    onSuccess = {
+                                        busy = false
+                                        otp = ""
+                                        resendIn = 60
+                                        step = 3
+                                    },
+                                    onFailure = { e ->
+                                        error = (e as? AuthException)?.uiMessage ?: registerErrorMsg
+                                        busy = false
+                                    }
                                 )
-                                busy = false
                             }
                         },
                         enabled = !busy,
@@ -214,11 +239,86 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         if (busy) {
                             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                         } else {
-                            Text(registerBtnText, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.register_btn), fontWeight = FontWeight.SemiBold)
                         }
                     }
                     TextButton(onClick = { step = 1; error = null }) {
                         Text(stringResource(R.string.back), fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    // Step 3: the 6-digit code sent to the mobile number.
+                    Text(
+                        stringResource(R.string.otp_sent_to, mobile),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = otp, onValueChange = { otp = it.filter { ch -> ch.isDigit() }.take(6) },
+                        label = { Text(stringResource(R.string.otp_code_label)) },
+                        singleLine = true, enabled = !busy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    }
+                    Button(
+                        onClick = {
+                            if (busy || otp.length != 6) return@Button
+                            busy = true; error = null
+                            scope.launch {
+                                AuthStore.registerOtpVerify(mobile.trim(), otp).fold(
+                                    onSuccess = {
+                                        // Verified — sign in straight away; the session flow flips
+                                        // the router back to Home (same as the login screen).
+                                        AuthStore.login(mobile.trim(), password).fold(
+                                            onSuccess = { busy = false },
+                                            onFailure = { e ->
+                                                busy = false
+                                                error = (e as? AuthException)?.uiMessage ?: otpErrorMsg
+                                            }
+                                        )
+                                    },
+                                    onFailure = { e ->
+                                        busy = false
+                                        error = (e as? AuthException)?.uiMessage ?: otpErrorMsg
+                                    }
+                                )
+                            }
+                        },
+                        enabled = !busy && otp.length == 6,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                        } else {
+                            Text(stringResource(R.string.otp_verify_btn), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    // Resend: re-posts the same data; the server re-sends a fresh code
+                    // as long as the account is still unverified.
+                    val resendLabel = if (resendIn > 0) stringResource(R.string.otp_resend_in, resendIn)
+                                      else stringResource(R.string.otp_resend)
+                    TextButton(
+                        onClick = {
+                            if (busy || resendIn > 0) return@TextButton
+                            busy = true; error = null
+                            scope.launch {
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode).fold(
+                                    onSuccess = { resendIn = 60 },
+                                    onFailure = { e ->
+                                        error = (e as? AuthException)?.uiMessage ?: otpErrorMsg
+                                    }
+                                )
+                                busy = false
+                            }
+                        },
+                        enabled = !busy && resendIn == 0
+                    ) {
+                        Text(resendLabel, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -236,7 +336,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
 @Composable
 private fun StepDot(active: Boolean, label: String) {
     val c = MaterialTheme.colorScheme
-    androidx.compose.foundation.layout.Box(
+    Box(
         Modifier
             .size(30.dp)
             .clip(CircleShape)
@@ -251,7 +351,7 @@ private fun StepDot(active: Boolean, label: String) {
 @Composable
 private fun StepLine(filled: Boolean) {
     val c = MaterialTheme.colorScheme
-    androidx.compose.foundation.layout.Box(
+    Box(
         Modifier
             .width(44.dp)
             .height(2.dp)

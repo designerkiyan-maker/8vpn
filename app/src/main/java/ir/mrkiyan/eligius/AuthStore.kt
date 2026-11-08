@@ -179,6 +179,79 @@ object AuthStore {
             }
         }
 
+    /** Step 1 of the OTP registration: validates everything server-side, creates
+     *  the account (username = mobile) and sends a 6-digit code via SMS. */
+    suspend fun registerOtpStart(
+        mobile: String,
+        email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        nationalCode: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = org.json.JSONObject()
+                .put("mobile", mobile)
+                .put("email", email)
+                .put("password", password)
+                .put("first_name", firstName)
+                .put("last_name", lastName)
+                .put("national_code", nationalCode)
+                .toString()
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/register/otp-start").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("User-Agent", "eligius-android")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                con.outputStream.use { it.write(payload.toByteArray()) }
+                val code = con.responseCode
+                val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val j = JSONObject(body)
+                if (code != 200) {
+                    throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                }
+            } finally {
+                con.disconnect()
+            }
+        }
+    }
+
+    /** Step 2: verifies the SMS code; the account then logs in with mobile + password. */
+    suspend fun registerOtpVerify(mobile: String, code: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val payload = org.json.JSONObject()
+                    .put("mobile", mobile)
+                    .put("code", code)
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/register/otp-verify").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    val rcode = con.responseCode
+                    val body = (if (rcode in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                    val j = JSONObject(body)
+                    if (rcode != 200) {
+                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                    }
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
     suspend fun login(user: String, pass: String): Result<Session> = withContext(Dispatchers.IO) {
         runCatching {
             jwtLogin(user, pass)   // null when the JWT route does not exist on the server
