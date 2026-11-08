@@ -154,7 +154,7 @@ fun AccountScreen(back: () -> Unit) {
         scope.launch {
             upd = UpdateState.Downloading(0)
             val file = File(ctx.cacheDir, "updates/eligius-update.apk")
-            Updater.download(info.apkUrl, file) { pct -> upd = UpdateState.Downloading(pct) }.fold(
+            Updater.download(listOf(info.apkUrl, info.apkUrlFallback), file) { pct -> upd = UpdateState.Downloading(pct) }.fold(
                 onSuccess = {
                     upd = UpdateState.Idle
                     if (!Updater.launchInstall(ctx, file)) upd = UpdateState.DownloadFailed

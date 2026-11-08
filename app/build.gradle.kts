@@ -51,6 +51,9 @@ android {
     // The Aether / Psiphon / Lyrebird executables ship as lib*.so and are run from
     // nativeLibraryDir, so they must be extracted to disk.
     packaging { jniLibs { useLegacyPackaging = true } }
+    // Local builds run without the NDK: keep .so debug symbols instead of stripping
+    // (CI strips them with the NDK — the difference is a few MB, purely cosmetic).
+    packaging { jniLibs { keepDebugSymbols += "**/*.so" } }
 
     buildFeatures {
         compose = true

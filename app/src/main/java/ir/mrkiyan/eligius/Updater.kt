@@ -14,20 +14,59 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * In-app update channel, currently checking GitHub releases
- * (repos/designerkiyan-maker/8vpn/releases/latest) — the APK matching the
- * device ABI is downloaded into the app cache and handed to the system
- * installer. Switching the check to the self-hosted WordPress endpoint
- * (/wp-json/eligius/v1/version) later is a drop-in change in check() alone.
+ * Update channel with two sources, tried in order:
+ *   1. Self-hosted — GET wp.mrkiyan.ir/wp-json/eligius/v1/version
+ *      (reachable from Iran; the app already authenticates against this host)
+ *   2. GitHub — repos/designerkiyan-maker/8vpn/releases/latest
+ * The APK is downloaded from the winning source, with the other URL kept
+ * as a fallback if the download itself fails. The user never leaves the app.
  */
 object Updater {
     const val ENABLED = true
+    private const val OWN_VERSION_API = "https://wp.mrkiyan.ir/wp-json/eligius/v1/version"
     private const val RELEASES_API = "https://api.github.com/repos/designerkiyan-maker/8vpn/releases/latest"
-    private const val ASSET_BASE = "https://github.com/designerkiyan-maker/8vpn/releases/download"
+    private const val GITHUB_ASSET_BASE = "https://github.com/designerkiyan-maker/8vpn/releases/download"
 
-    data class Info(val version: String, val newer: Boolean, val apkUrl: String)
+    data class Info(
+        val version: String,
+        val newer: Boolean,
+        val apkUrl: String,          // tried first
+        val apkUrlFallback: String,  // tried if the first download fails
+    )
 
-    suspend fun check(): Result<Info> = withContext(Dispatchers.IO) {
+    suspend fun check(): Result<Info> {
+        // 1) self-hosted (works from Iran; the app already authenticates against this host)
+        val own = checkOwnSite()
+        if (own.isSuccess) return own
+        // 2) GitHub fallback
+        return checkGitHub()
+    }
+
+    private suspend fun checkOwnSite(): Result<Info> = withContext(Dispatchers.IO) {
+        runCatching {
+            val con = (URL(OWN_VERSION_API).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8_000
+                readTimeout = 12_000
+                setRequestProperty("User-Agent", "eligius-android")
+            }
+            try {
+                if (con.responseCode != 200) error("HTTP ${con.responseCode}")
+                val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
+                val version = j.getString("version").trimStart('v', 'V')
+                val ownUrl = j.optString("apk_url")
+                Info(
+                    version = version,
+                    newer = isNewer(version, BuildConfig.VERSION_NAME),
+                    apkUrl = ownUrl,
+                    apkUrlFallback = githubApkUrl(version),
+                )
+            } finally {
+                con.disconnect()
+            }
+        }
+    }
+
+    private suspend fun checkGitHub(): Result<Info> = withContext(Dispatchers.IO) {
         runCatching {
             val con = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10_000
@@ -40,9 +79,10 @@ object Updater {
                 val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
                 val tag = j.getString("tag_name")
                 Info(
-                    version = tag,
+                    version = tag.trimStart('v', 'V'),
                     newer = isNewer(tag, BuildConfig.VERSION_NAME),
-                    apkUrl = apkUrl(tag),
+                    apkUrl = githubApkUrl(tag),
+                    apkUrlFallback = githubApkUrl(tag),
                 )
             } finally {
                 con.disconnect()
@@ -50,8 +90,8 @@ object Updater {
         }
     }
 
-    /** The release APK that matches this device's primary ABI (universal as the safe default). */
-    fun apkUrl(tag: String): String = "$ASSET_BASE/$tag/Eligius-${abiAsset()}.apk"
+    private fun githubApkUrl(tag: String): String =
+        "$GITHUB_ASSET_BASE/${tag.trimStart('v', 'V')}/Eligius-${abiAsset()}.apk"
 
     private fun abiAsset(): String {
         val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: return "universal"
@@ -71,8 +111,22 @@ object Updater {
             .setData(Uri.parse("package:" + ctx.packageName))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    /** Streams [url] into [dest], reporting 0-100 progress while it runs. */
-    suspend fun download(url: String, dest: File, onProgress: (Int) -> Unit): Result<Unit> =
+    /**
+     * Downloads [urls] in order into [dest] (first success wins), reporting 0-100 progress.
+     * Every downloaded payload must start with the APK zip magic — anything else counts
+     * as a failure for that URL and the next one is tried.
+     */
+    suspend fun download(urls: List<String>, dest: File, onProgress: (Int) -> Unit): Result<Unit> {
+        var lastError: Exception? = null
+        for (url in urls) {
+            val r = downloadOnce(url, dest, onProgress)
+            if (r.isSuccess) return r
+            lastError = r.exceptionOrNull() as? Exception ?: Exception("download failed")
+        }
+        return Result.failure(lastError ?: Exception("download failed"))
+    }
+
+    private suspend fun downloadOnce(url: String, dest: File, onProgress: (Int) -> Unit): Result<Unit> =
         withContext(Dispatchers.IO) {
             runCatching {
                 dest.parentFile?.mkdirs()
