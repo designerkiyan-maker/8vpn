@@ -163,6 +163,13 @@
     <string name="show_password">نمایش رمز</string>
     <string name="hide_password">پنهان کردن رمز</string>
     <string name="language_toggle">زبان</string>
+    <string name="forgot_password">فراموشی رمز عبور؟</string>
+    <string name="forgot_title">بازیابی رمز عبور</string>
+    <string name="forgot_hint">شماره موبایل حساب خود را وارد کنید تا کد تایید برایتان پیامک شود.</string>
+    <string name="send_code">ارسال کد</string>
+    <string name="new_password">رمز عبور جدید</string>
+    <string name="new_password_hint">یک رمز عبور جدید برای حساب‌تان تعیین کنید. پس از آن به‌صورت خودکار وارد می‌شوید.</string>
+    <string name="reset_btn">تغییر رمز</string>
     <string name="logged_in_as">وارد شده با حساب %1$s</string>
     <string name="logout">خروج از حساب</string>
     <string name="nav_connection">اتصال</string>

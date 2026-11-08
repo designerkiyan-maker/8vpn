@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 
 /** Login gate shown until a valid mrkiyan.ir account session exists. */
 @Composable
-fun AuthScreen(onRegister: () -> Unit) {    val c = MaterialTheme.colorScheme
+fun AuthScreen(onRegister: () -> Unit, onForgot: () -> Unit) {    val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
@@ -122,6 +122,17 @@ fun AuthScreen(onRegister: () -> Unit) {    val c = MaterialTheme.colorScheme
                     } else {
                         Text(stringResource(R.string.login_btn), fontWeight = FontWeight.SemiBold)
                     }
+                }
+                TextButton(
+                    onClick = onForgot,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.forgot_password),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }

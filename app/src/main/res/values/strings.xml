@@ -168,6 +168,13 @@
     <string name="show_password">Show password</string>
     <string name="hide_password">Hide password</string>
     <string name="language_toggle">Language</string>
+    <string name="forgot_password">Forgot password?</string>
+    <string name="forgot_title">Password recovery</string>
+    <string name="forgot_hint">Enter the mobile number of your account — a verification code will be texted to you.</string>
+    <string name="send_code">Send code</string>
+    <string name="new_password">New password</string>
+    <string name="new_password_hint">Set a new password for your account. You will be signed in automatically afterwards.</string>
+    <string name="reset_btn">Change password</string>
     <string name="logged_in_as">Signed in as %1$s</string>
     <string name="logout">Log out</string>
     <string name="nav_connection">Connection</string>

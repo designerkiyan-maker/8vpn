@@ -78,6 +78,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // SMS Retriever + SMS User Consent (auto-fill of the OTP code, no READ_SMS permission).
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     // sing-box (libbox), built by the "libbox" job of the GitHub workflow into app/libs/libbox.aar.
     implementation(files("libs/libbox.aar"))
 }

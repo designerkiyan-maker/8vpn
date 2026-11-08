@@ -136,10 +136,11 @@ private fun Root(onLanguageChanged: () -> Unit) {
                             ACCOUNT -> AccountScreen(back = { screen = HOME })
                             LOGS -> LogsScreen(back = { screen = HOME })
                             SPLIT -> SplitScreen(back = { screen = SETTINGS })
-                            AUTH -> AuthScreen(onRegister = { screen = AUTH_REGISTER })
+                            AUTH -> AuthScreen(onRegister = { screen = AUTH_REGISTER }, onForgot = { screen = AUTH_FORGOT })
                             // SECURITY FIX: "Log in" from the register screen opens the LOGIN screen,
                             // never the app itself.
                             AUTH_REGISTER -> AuthRegisterScreen(onBack = { screen = AUTH }, onLogin = { screen = AUTH })
+                            AUTH_FORGOT -> AuthForgotScreen(onBack = { screen = AUTH })
                             AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
                         }
                     }
@@ -172,3 +173,4 @@ private const val SPLIT = 5
 private const val AUTH = 6
 private const val AUTH_WEB = 7
 private const val AUTH_REGISTER = 8
+private const val AUTH_FORGOT = 9

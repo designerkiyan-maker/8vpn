@@ -72,6 +72,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val smsHash = remember { SmsOtp.appHash(ctx) }
     var step by remember { mutableIntStateOf(1) }
     var firstName by remember { mutableStateOf("") }
     var lastName by remember { mutableStateOf("") }
@@ -257,7 +259,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                             error = null
                             busy = true
                             scope.launch {
-                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode).fold(
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode, smsHash).fold(
                                     onSuccess = {
                                         busy = false
                                         otp = ""
@@ -293,13 +295,9 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    OutlinedTextField(
-                        value = otp, onValueChange = { otp = it.filter { ch -> ch.isDigit() }.take(6) },
-                        label = { Text(stringResource(R.string.otp_code_label)) },
-                        singleLine = true, enabled = !busy,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    // SMS auto-fill (Retriever, consent fallback) + split boxes.
+                    SmsOtpEffect(onCode = { code -> if (!busy && otp.length < 6) otp = code })
+                    SplitOtpInput(value = otp, onValueChange = { otp = it }, enabled = !busy)
                     error?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
@@ -346,7 +344,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                             if (busy || resendIn > 0) return@TextButton
                             busy = true; error = null
                             scope.launch {
-                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode).fold(
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode, smsHash).fold(
                                     onSuccess = { resendIn = 60 },
                                     onFailure = { e ->
                                         error = (e as? AuthException)?.uiMessage ?: otpErrorMsg
@@ -374,7 +372,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
 }
 
 @Composable
-private fun StepDot(active: Boolean, label: String) {
+fun StepDot(active: Boolean, label: String) {
     val c = MaterialTheme.colorScheme
     Box(
         Modifier
@@ -389,7 +387,7 @@ private fun StepDot(active: Boolean, label: String) {
 }
 
 @Composable
-private fun StepLine(filled: Boolean) {
+fun StepLine(filled: Boolean) {
     val c = MaterialTheme.colorScheme
     Box(
         Modifier

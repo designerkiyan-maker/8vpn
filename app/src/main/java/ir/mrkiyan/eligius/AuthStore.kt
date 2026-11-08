@@ -180,14 +180,16 @@ object AuthStore {
         }
 
     /** Step 1 of the OTP registration: validates everything server-side, creates
-     *  the account (username = mobile) and sends a 6-digit code via SMS. */
+     *  the account (username = mobile) and sends a 6-digit code via SMS.
+     *  [hash] = the SMS-Retriever signature hash so the SMS can be auto-read. */
     suspend fun registerOtpStart(
         mobile: String,
         email: String,
         password: String,
         firstName: String,
         lastName: String,
-        nationalCode: String
+        nationalCode: String,
+        hash: String? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val payload = org.json.JSONObject()
@@ -197,6 +199,7 @@ object AuthStore {
                 .put("first_name", firstName)
                 .put("last_name", lastName)
                 .put("national_code", nationalCode)
+                .apply { if (!hash.isNullOrEmpty()) put("hash", hash) }
                 .toString()
             val con = (URL("$WP_BASE/wp-json/eligius/v1/register/otp-start").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -244,6 +247,102 @@ object AuthStore {
                         ?.bufferedReader()?.use { it.readText() } ?: ""
                     val j = JSONObject(body)
                     if (rcode != 200) {
+                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                    }
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
+    /** Forgot password step 1: asks the server to OTP-verify an EXISTING,
+     *  mobile-verified account and send the code. */
+    suspend fun forgotStart(mobile: String, hash: String? = null): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val payload = org.json.JSONObject()
+                    .put("mobile", mobile)
+                    .apply { if (!hash.isNullOrEmpty()) put("hash", hash) }
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/register/forgot-start").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    val code = con.responseCode
+                    val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                    val j = JSONObject(body)
+                    if (code != 200) {
+                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                    }
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
+    /** Forgot password step 2: verifies the code, returns the single-use reset token. */
+    suspend fun forgotVerify(mobile: String, code: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val payload = org.json.JSONObject()
+                    .put("mobile", mobile)
+                    .put("code", code)
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/register/forgot-verify").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    val rcode = con.responseCode
+                    val body = (if (rcode in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                    val j = JSONObject(body)
+                    if (rcode != 200) {
+                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
+                    }
+                    j.optString("reset_token").takeIf { it.isNotEmpty() }
+                        ?: error("no reset token in response")
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
+    /** Forgot password step 3: exchanges the reset token for the new password. */
+    suspend fun forgotReset(token: String, password: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val payload = org.json.JSONObject()
+                    .put("reset_token", token)
+                    .put("password", password)
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/register/forgot-reset").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    val code = con.responseCode
+                    val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                        ?.bufferedReader()?.use { it.readText() } ?: ""
+                    val j = JSONObject(body)
+                    if (code != 200) {
                         throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
                     }
                 } finally {
