@@ -160,6 +160,9 @@
     <string name="otp_resend">ارسال مجدد کد</string>
     <string name="otp_resend_in">ارسال مجدد کد (%1$d)</string>
     <string name="otp_error">تایید ناموفق بود. دوباره تلاش کنید.</string>
+    <string name="show_password">نمایش رمز</string>
+    <string name="hide_password">پنهان کردن رمز</string>
+    <string name="language_toggle">زبان</string>
     <string name="logged_in_as">وارد شده با حساب %1$s</string>
     <string name="logout">خروج از حساب</string>
     <string name="nav_connection">اتصال</string>

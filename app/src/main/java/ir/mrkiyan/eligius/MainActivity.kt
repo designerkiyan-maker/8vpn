@@ -123,7 +123,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
                 ) {
                     AnimatedContent(
                         targetState = screen,
-                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(140)) },
+                        transitionSpec = { fadeIn(tween(280)) togetherWith fadeOut(tween(200)) },
                         label = "nav"
                     ) { sc ->
                         when (sc) {

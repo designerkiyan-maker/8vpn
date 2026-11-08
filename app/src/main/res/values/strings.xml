@@ -165,6 +165,9 @@
     <string name="otp_resend">Resend code</string>
     <string name="otp_resend_in">Resend code (%1$d)</string>
     <string name="otp_error">Verification failed. Please try again.</string>
+    <string name="show_password">Show password</string>
+    <string name="hide_password">Hide password</string>
+    <string name="language_toggle">Language</string>
     <string name="logged_in_as">Signed in as %1$s</string>
     <string name="logout">Log out</string>
     <string name="nav_connection">Connection</string>

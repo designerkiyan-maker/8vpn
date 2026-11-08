@@ -1,11 +1,18 @@
 package ir.mrkiyan.eligius
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,6 +31,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -39,10 +48,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,6 +80,8 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     var nationalCode by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
     var otp by remember { mutableStateOf("") }
     var resendIn by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
@@ -105,7 +119,8 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(32.dp))
+        LanguageTogglePill()
+        Spacer(Modifier.height(20.dp))
         LogoMark(64.dp)
         Spacer(Modifier.height(12.dp))
         Text(stringResource(R.string.register_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -120,8 +135,14 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
         }
         Spacer(Modifier.height(20.dp))
         AppCard {
+            // Fade in/out between wizard steps.
+            AnimatedContent(
+                targetState = step,
+                transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(180)) },
+                label = "wizard"
+            ) { s ->
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (step == 1) {
+                if (s == 1) {
                     OutlinedTextField(
                         value = firstName, onValueChange = { firstName = it },
                         label = { Text(stringResource(R.string.first_name)) },
@@ -158,7 +179,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) { Text(stringResource(R.string.next_btn), fontWeight = FontWeight.SemiBold) }
-                } else if (step == 2) {
+                } else if (s == 2) {
                     OutlinedTextField(
                         value = email, onValueChange = { email = it },
                         label = { Text(stringResource(R.string.email)) },
@@ -177,16 +198,34 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         value = password, onValueChange = { password = it },
                         label = { Text(stringResource(R.string.password)) },
                         singleLine = true, enabled = !busy,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { showPass = !showPass }) {
+                                Icon(
+                                    painterResource(if (showPass) R.drawable.ic_solar_eye_closed else R.drawable.ic_solar_eye),
+                                    contentDescription = stringResource(if (showPass) R.string.hide_password else R.string.show_password),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = confirmPassword, onValueChange = { confirmPassword = it },
                         label = { Text(stringResource(R.string.confirm_password)) },
                         singleLine = true, enabled = !busy,
-                        visualTransformation = PasswordVisualTransformation(),
+                        visualTransformation = if (showConfirm) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { showConfirm = !showConfirm }) {
+                                Icon(
+                                    painterResource(if (showConfirm) R.drawable.ic_solar_eye_closed else R.drawable.ic_solar_eye),
+                                    contentDescription = stringResource(if (showConfirm) R.string.hide_password else R.string.show_password),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                     error?.let {
@@ -321,6 +360,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         Text(resendLabel, fontWeight = FontWeight.SemiBold)
                     }
                 }
+            }
             }
         }
         Spacer(Modifier.height(14.dp))

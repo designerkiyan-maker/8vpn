@@ -1,8 +1,11 @@
 package ir.mrkiyan.eligius
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -31,10 +36,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,11 +50,11 @@ import kotlinx.coroutines.launch
 
 /** Login gate shown until a valid mrkiyan.ir account session exists. */
 @Composable
-fun AuthScreen(onRegister: () -> Unit) {
-    val c = MaterialTheme.colorScheme
+fun AuthScreen(onRegister: () -> Unit) {    val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var user by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var showPass by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val genericError = stringResource(R.string.login_error)
@@ -56,7 +64,8 @@ fun AuthScreen(onRegister: () -> Unit) {
             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(48.dp))
+        LanguageTogglePill()
+        Spacer(Modifier.height(28.dp))
         LogoMark(84.dp)
         Spacer(Modifier.height(14.dp))
         Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -76,8 +85,17 @@ fun AuthScreen(onRegister: () -> Unit) {
                     value = pass, onValueChange = { pass = it },
                     label = { Text(stringResource(R.string.password)) },
                     singleLine = true, enabled = !busy,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { showPass = !showPass }) {
+                            Icon(
+                                painterResource(if (showPass) R.drawable.ic_solar_eye_closed else R.drawable.ic_solar_eye),
+                                contentDescription = stringResource(if (showPass) R.string.hide_password else R.string.show_password),
+                                tint = c.onSurfaceVariant, modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
                 error?.let {
@@ -114,6 +132,39 @@ fun AuthScreen(onRegister: () -> Unit) {
         )
         TextButton(onClick = onRegister) { Text(stringResource(R.string.create_account), fontWeight = FontWeight.SemiBold) }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Small language switch pill (Solar "global" icon) shown on the auth forms.
+ *  Shows the language you would switch TO; tapping persists via SettingsStore
+ *  and recreates the activity so LocaleHelper re-wraps the resources. */
+@Composable
+fun LanguageTogglePill() {
+    val ctx = LocalContext.current
+    val lang = SettingsStore.current.language
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(
+            onClick = {
+                SettingsStore.update { it.copy(language = if (lang == "fa") "en" else "fa") }
+                (ctx as? Activity)?.recreate()
+            },
+            modifier = Modifier.height(34.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_solar_global),
+                contentDescription = stringResource(R.string.language_toggle),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (lang == "fa") "English" else "فارسی",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
