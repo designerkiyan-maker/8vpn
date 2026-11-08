@@ -23,7 +23,13 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  *   2) Your sender line (خط ارسال) → ELIGIUS_IPPANEL_FROM (e.g. +983000505)
  * OPTIONAL: create an OTP pattern (text containing the placeholder %code%)
  * in the panel and put its code into ELIGIUS_IPPANEL_OTP_PATTERN. If empty,
- * a plain SMS «کد تایید الیژیوس: XXXXXX» is sent instead.                  */
+ * a plain SMS «کد تایید الیژیوس: XXXXXX» is sent instead.
+ * OPTIONAL (SMS auto-fill): create a TWO-variable pattern whose text ends
+ * with «%hash%» (e.g. «کد تایید الیژیوس: %code% %hash%») and put its code
+ * into ELIGIUS_IPPANEL_OTP_PATTERN_AUTO. When the app sends an SMS-Retriever
+ * hash, that pattern (fast lane) is used; until it is configured/approved the
+ * fallback is the plain webservice SMS with the hash appended — the Retriever
+ * needs the 11-char app hash at the END of the message to auto-read it.     */
 if ( ! defined( 'ELIGIUS_IPPANEL_KEY' ) ) {
 	define( 'ELIGIUS_IPPANEL_KEY', '' );
 }
@@ -32,6 +38,9 @@ if ( ! defined( 'ELIGIUS_IPPANEL_FROM' ) ) {
 }
 if ( ! defined( 'ELIGIUS_IPPANEL_OTP_PATTERN' ) ) {
 	define( 'ELIGIUS_IPPANEL_OTP_PATTERN', '' );
+}
+if ( ! defined( 'ELIGIUS_IPPANEL_OTP_PATTERN_AUTO' ) ) {
+	define( 'ELIGIUS_IPPANEL_OTP_PATTERN_AUTO', '' );
 }
 
 /* The rate limiter normally comes from the eligius-register.php mu-plugin.
@@ -70,10 +79,18 @@ function eligius_otp_mobile_e164( $mobile ) {
 /** Sends the OTP via IPPanel Edge: pattern SMS (fast lane) if configured, with
  *  automatic fallback to plain webservice SMS if the pattern send ever fails
  *  (e.g. pattern still pending approval) — the OTP must never be undeliverable.
+ *
+ *  $hash (optional, 11 chars): the Android app's SMS-Retriever signature hash.
+ *  When present, the hash is appended at the very END of the message so the app
+ *  can auto-read the code (SMS Retriever API). Lane selection with a hash:
+ *    1) ELIGIUS_IPPANEL_OTP_PATTERN_AUTO (two-variable pattern %code%+%hash%)
+ *    2) plain webservice SMS «کد تایید الیژیوس: CODE HASH»
+ *  Without a hash the classic single-variable pattern lane is used unchanged.
+ *
  *  Endpoint/shape VERIFIED live against edge.ippanel.com (2026-11-08):
  *  POST https://edge.ippanel.com/v1/api/send — webservice keeps recipients INSIDE
  *  params; pattern wants recipients at TOP level (single recipient) + flat params. */
-function eligius_otp_send_sms( $mobile, $code ) {
+function eligius_otp_send_sms( $mobile, $code, $hash = '' ) {
 	$key  = ELIGIUS_IPPANEL_KEY;
 	$from = ELIGIUS_IPPANEL_FROM;
 	if ( $key === '' || $from === '' ) {
@@ -81,7 +98,22 @@ function eligius_otp_send_sms( $mobile, $code ) {
 			'SMS gateway is not configured. / درگاه پیامک تنظیم نشده است.',
 			array( 'status' => 500 ) );
 	}
-	if ( ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
+	$hash = preg_replace( '/[^A-Za-z0-9+\/=]/', '', (string) $hash );
+	if ( strlen( $hash ) !== 11 ) {
+		$hash = '';
+	}
+
+	if ( $hash !== '' && ELIGIUS_IPPANEL_OTP_PATTERN_AUTO !== '' ) {
+		$via_pattern = eligius_otp_send_ippanel( array(
+			'sending_type' => 'pattern',
+			'from_number'  => $from,
+			'code'         => ELIGIUS_IPPANEL_OTP_PATTERN_AUTO,
+			'recipients'   => array( eligius_otp_mobile_e164( $mobile ) ),
+			'params'       => array( 'code' => $code, 'hash' => $hash ),
+		) );
+		if ( ! is_wp_error( $via_pattern ) ) return true;   // fast lane + auto-fill
+		// else fall through to the plain webservice send below.
+	} elseif ( $hash === '' && ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
 		$via_pattern = eligius_otp_send_ippanel( array(
 			'sending_type' => 'pattern',
 			'from_number'  => $from,
@@ -90,12 +122,17 @@ function eligius_otp_send_sms( $mobile, $code ) {
 			'params'       => array( 'code' => $code ),
 		) );
 		if ( ! is_wp_error( $via_pattern ) ) return true;   // fast lane delivered
-		// else fall through to the plain webservice send below.
+	}
+
+	// Plain webservice lane (also the fallback for every pattern failure).
+	$message = 'کد تایید الیژیوس: ' . $code;
+	if ( $hash !== '' ) {
+		$message .= ' ' . $hash;   // SMS Retriever: hash must END the message
 	}
 	return eligius_otp_send_ippanel( array(
 		'sending_type' => 'webservice',
 		'from_number'  => $from,
-		'message'      => 'کد تایید الیژیوس: ' . $code,
+		'message'      => $message,
 		'params'       => array( 'recipients' => array( eligius_otp_mobile_e164( $mobile ) ) ),
 	) );
 }
@@ -134,6 +171,7 @@ add_action( 'rest_api_init', function () {
 			'first_name'    => array( 'required' => true,  'type' => 'string' ),
 			'last_name'     => array( 'required' => true,  'type' => 'string' ),
 			'national_code' => array( 'required' => true,  'type' => 'string' ),
+			'hash'          => array( 'required' => false, 'type' => 'string' ),
 		),
 	) );
 	register_rest_route( 'eligius/v1', '/register/otp-verify', array(
@@ -143,6 +181,35 @@ add_action( 'rest_api_init', function () {
 		'args'                => array(
 			'mobile' => array( 'required' => true, 'type' => 'string' ),
 			'code'   => array( 'required' => true, 'type' => 'string' ),
+		),
+	) );
+
+	/* ── forgot password: start (send OTP) → verify (issue reset token) → reset ── */
+	register_rest_route( 'eligius/v1', '/register/forgot-start', array(
+		'methods'             => 'POST',
+		'permission_callback' => '__return_true',
+		'callback'            => 'eligius_forgot_start_handler',
+		'args'                => array(
+			'mobile' => array( 'required' => true,  'type' => 'string' ),
+			'hash'   => array( 'required' => false, 'type' => 'string' ),
+		),
+	) );
+	register_rest_route( 'eligius/v1', '/register/forgot-verify', array(
+		'methods'             => 'POST',
+		'permission_callback' => '__return_true',
+		'callback'            => 'eligius_forgot_verify_handler',
+		'args'                => array(
+			'mobile' => array( 'required' => true, 'type' => 'string' ),
+			'code'   => array( 'required' => true, 'type' => 'string' ),
+		),
+	) );
+	register_rest_route( 'eligius/v1', '/register/forgot-reset', array(
+		'methods'             => 'POST',
+		'permission_callback' => '__return_true',
+		'callback'            => 'eligius_forgot_reset_handler',
+		'args'                => array(
+			'reset_token' => array( 'required' => true, 'type' => 'string' ),
+			'password'    => array( 'required' => true, 'type' => 'string' ),
 		),
 	) );
 } );
@@ -256,7 +323,7 @@ function eligius_otp_start_handler( WP_REST_Request $req ) {
 		10 * MINUTE_IN_SECONDS
 	);
 
-	$sms = eligius_otp_send_sms( $mobile, $otp );
+	$sms = eligius_otp_send_sms( $mobile, $otp, (string) $req->get_param( 'hash' ) );
 	if ( is_wp_error( $sms ) ) {
 		// The SMS failed — if we created the account just now, delete it so the
 		// user can retry cleanly; an account we merely re-used is kept.
@@ -310,5 +377,135 @@ function eligius_otp_verify_handler( WP_REST_Request $req ) {
 	return rest_ensure_response( array(
 		'verified' => true,
 		'username' => $mobile,
+	) );
+}
+
+/* ─────────────────────────  forgot password  ───────────────────────── */
+/* Three steps, all server-authoritative, all abuse-guarded:
+ *   forgot-start  — mobile must belong to an EXISTING account with a VERIFIED
+ *                   mobile (no new accounts, no enumeration of unverified ones);
+ *                   sends the OTP (same lanes as registration, hash-aware).
+ *   forgot-verify — same brute-force guards as registration verify (max 5 tries,
+ *                   10 min); on success issues a 160-bit single-use reset token
+ *                   valid 10 minutes. The password itself is NEVER carried
+ *                   through the verify step.
+ *   forgot-reset  — exchanges (reset_token, new password) — one shot, then the
+ *                   token transient is destroyed.                          */
+
+function eligius_forgot_start_handler( WP_REST_Request $req ) {
+
+	if ( eligius_rate_limited() ) {
+		return new WP_Error( 'eligius_throttled',
+			'Too many attempts. Try again later. / تلاش بیش از حد. بعداً دوباره امتحان کنید.',
+			array( 'status' => 429 ) );
+	}
+
+	$mobile = eligius_otp_normalize_mobile( $req->get_param( 'mobile' ) );
+	if ( $mobile === null ) {
+		return new WP_Error( 'eligius_bad_mobile', 'Invalid mobile number (09xxxxxxxxx). / شماره موبایل نامعتبر است.', array( 'status' => 400 ) );
+	}
+	$user_id = username_exists( $mobile );
+	if ( ! $user_id || ! get_user_meta( (int) $user_id, 'eligius_mobile_verified', true ) ) {
+		// Only existing, mobile-VERIFIED accounts may be recovered — this endpoint
+		// can never create an account or touch an unverified orphan.
+		return new WP_Error( 'eligius_not_found',
+			'No verified account was found for this mobile number. / هیچ حساب تاییدشده‌ای برای این شماره پیدا نشد.',
+			array( 'status' => 404 ) );
+	}
+
+	$otp = (string) random_int( 100000, 999999 );
+	set_transient(
+		'eligius_forgot_' . md5( $mobile ),
+		wp_json_encode( array(
+			'h'     => hash( 'sha256', $otp . wp_salt() ),
+			'uid'   => (int) $user_id,
+			'exp'   => time() + 10 * MINUTE_IN_SECONDS,
+			'tries' => 0,
+		) ),
+		10 * MINUTE_IN_SECONDS
+	);
+
+	$sms = eligius_otp_send_sms( $mobile, $otp, (string) $req->get_param( 'hash' ) );
+	if ( is_wp_error( $sms ) ) {
+		delete_transient( 'eligius_forgot_' . md5( $mobile ) );
+		return $sms;
+	}
+
+	return rest_ensure_response( array(
+		'sent'       => true,
+		'expires_in' => 600,
+		'username'   => $mobile,
+	) );
+}
+
+function eligius_forgot_verify_handler( WP_REST_Request $req ) {
+	$mobile = eligius_otp_normalize_mobile( $req->get_param( 'mobile' ) );
+	$code   = preg_replace( '/\D/', '', (string) $req->get_param( 'code' ) );
+	$tkey   = 'eligius_forgot_' . md5( (string) $mobile );
+	$data   = json_decode( get_transient( $tkey ), true );
+
+	if ( ! is_array( $data ) || empty( $data['uid'] ) || (int) $data['exp'] < time() ) {
+		delete_transient( $tkey );
+		return new WP_Error( 'eligius_otp_expired', 'The code expired. Request a new one. / کد منقضی شده است. دوباره درخواست کنید.', array( 'status' => 400 ) );
+	}
+	if ( (int) $data['tries'] >= 5 ) {
+		delete_transient( $tkey );
+		return new WP_Error( 'eligius_otp_locked', 'Too many wrong attempts. Request a new code. / تلاش بیش از حد. کد جدید بگیرید.', array( 'status' => 400 ) );
+	}
+	if ( ! hash_equals( (string) $data['h'], hash( 'sha256', $code . wp_salt() ) ) ) {
+		$data['tries'] = (int) $data['tries'] + 1;
+		set_transient( $tkey, wp_json_encode( $data ), 10 * MINUTE_IN_SECONDS );
+		$left = 5 - (int) $data['tries'];
+		return new WP_Error( 'eligius_otp_wrong',
+			'Wrong code. Attempts left: ' . $left . ' / کد اشتباه است. تلاش باقی‌مانده: ' . $left,
+			array( 'status' => 400 ) );
+	}
+
+	// Verified — mint a single-use, 10-minute, 160-bit reset token and burn the OTP.
+	delete_transient( $tkey );
+	$token = bin2hex( random_bytes( 20 ) );
+	set_transient(
+		'eligius_reset_' . $token,
+		wp_json_encode( array(
+			'uid'    => (int) $data['uid'],
+			'mobile' => $mobile,
+			'exp'    => time() + 10 * MINUTE_IN_SECONDS,
+		) ),
+		10 * MINUTE_IN_SECONDS
+	);
+
+	return rest_ensure_response( array(
+		'verified'    => true,
+		'reset_token' => $token,
+		'username'    => $mobile,
+	) );
+}
+
+function eligius_forgot_reset_handler( WP_REST_Request $req ) {
+	$token  = preg_replace( '/[^a-f0-9]/', '', (string) $req->get_param( 'reset_token' ) );
+	$password = (string) $req->get_param( 'password' );
+	if ( strlen( $token ) !== 40 ) {
+		return new WP_Error( 'eligius_reset_bad', 'Invalid reset token. / توکن بازیابی نامعتبر است.', array( 'status' => 400 ) );
+	}
+	$tkey = 'eligius_reset_' . $token;
+	$data = json_decode( get_transient( $tkey ), true );
+	if ( ! is_array( $data ) || empty( $data['uid'] ) || (int) $data['exp'] < time() ) {
+		delete_transient( $tkey );
+		return new WP_Error( 'eligius_reset_expired', 'The reset link expired. Start again. / مهلت بازیابی تمام شد. دوباره شروع کنید.', array( 'status' => 400 ) );
+	}
+	if ( strlen( $password ) < 8 ) {
+		return new WP_Error( 'eligius_weak_password', 'Password must be at least 8 characters. / رمز عبور باید حداقل ۸ کاراکتر باشد.', array( 'status' => 400 ) );
+	}
+
+	// Single use: burn the token BEFORE touching the account.
+	delete_transient( $tkey );
+	wp_update_user( array(
+		'ID'        => (int) $data['uid'],
+		'user_pass' => $password,
+	) );
+
+	return rest_ensure_response( array(
+		'success'  => true,
+		'username' => isset( $data['mobile'] ) ? $data['mobile'] : get_userdata( (int) $data['uid'] )->user_login,
 	) );
 }
