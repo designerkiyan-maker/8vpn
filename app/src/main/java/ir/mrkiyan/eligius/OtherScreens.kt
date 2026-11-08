@@ -71,11 +71,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Newest-release direct download: GitHub serves the newest release's asset at this fixed URL. */
-const val DOWNLOAD_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest/download/Eligius-universal.apk"
+const val DOWNLOAD_URL = "https://wp.mrkiyan.ir/download"
 const val RELEASES_URL = "https://github.com/designerkiyan-maker/8vpn/releases/latest"
 
 /** Device-aware download page (GitHub Pages): detects the phone's ABI and serves the matching APK. */
-const val PAGES_URL = "https://designerkiyan-maker.github.io/8vpn/"
+const val PAGES_URL = "https://wp.mrkiyan.ir/download"
 
 @Composable
 fun LogsScreen(back: () -> Unit) {
