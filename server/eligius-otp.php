@@ -113,7 +113,12 @@ function eligius_otp_send_sms( $mobile, $code, $hash = '' ) {
 		) );
 		if ( ! is_wp_error( $via_pattern ) ) return true;   // fast lane + auto-fill
 		// else fall through to the plain webservice send below.
-	} elseif ( $hash === '' && ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
+	} elseif ( ELIGIUS_IPPANEL_OTP_PATTERN !== '' ) {
+		// Regular approved pattern — FAST lane, used regardless of the hash:
+		// the app's hash param must never demote sends to the slow webservice
+		// lane. Auto-fill still works via the SMS User Consent dialog, which
+		// accepts ANY message shape (carriers append «لغو 11» after our hash,
+		// so the pure Retriever match is unreliable on Iranian carriers anyway).
 		$via_pattern = eligius_otp_send_ippanel( array(
 			'sending_type' => 'pattern',
 			'from_number'  => $from,
