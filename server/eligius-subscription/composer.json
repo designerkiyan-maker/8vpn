@@ -1,0 +1,12 @@
+{
+    "name": "eligius/eligius-subscription",
+    "description": "Subscription, licensing, device binding, and payment management for the Eligius VPN Android client (WordPress plugin).",
+    "type": "wordpress-plugin",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "classmap": ["includes/"]
+    }
+}

@@ -1,0 +1,16 @@
+# Copyright (C) 2026 Eligius Team
+# This file is distributed under the same license as the Eligius Subscription Management plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Eligius Subscription Management 1.0.0\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-11-12T00:00:00+00:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: eligius-subscription Phase 0 scaffold\n"
+"X-Domain: eligius-subscription\n"
+
+# Phase 0: no translatable strings yet.
+# Regenerate this template in P1 when the first UI strings (admin pages, REST
+# error messages) land, e.g. with wp-cli: wp i18n make-pot . languages/eligius-subscription.pot

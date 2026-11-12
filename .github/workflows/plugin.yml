@@ -1,0 +1,62 @@
+name: Plugin CI
+
+# Phase 0 CI for the eligius-subscription WordPress plugin.
+# Android builds live in main.yml — this workflow only covers the plugin.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/eligius-subscription/**"
+      - ".github/workflows/plugin.yml"
+  pull_request:
+    paths:
+      - "server/eligius-subscription/**"
+      - ".github/workflows/plugin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-bootstrap:
+    name: PHP ${{ matrix.php }} — lint, deps, bootstrap
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.4", "8.3"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Phase 0 structure guard
+        working-directory: server/eligius-subscription
+        run: |
+          test -f eligius-subscription.php
+          test -f includes/bootstrap.php
+          test -f includes/activation.php
+          test -f includes/deactivation.php
+          test -f includes/uninstall.php
+          test -f languages/eligius-subscription.pot
+          test -f composer.json
+
+      - name: Syntax check (php -l) on all plugin PHP files
+        working-directory: server/eligius-subscription
+        run: find . -type f -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Validate composer.json
+        working-directory: server/eligius-subscription
+        run: composer validate --strict --no-check-publish
+
+      - name: composer install (dependency resolution check)
+        working-directory: server/eligius-subscription
+        run: composer install --no-interaction --no-progress
+
+      - name: Bootstrap integrity test (WP-stub harness)
+        run: php server/eligius-subscription/tests/unit/bootstrap-test.php
