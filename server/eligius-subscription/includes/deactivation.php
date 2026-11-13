@@ -1,9 +1,7 @@
 <?php
 /**
- * Deactivation hook (doc 01-SYSTEM-ARCHITECTURE.md §2.2).
- *
- * Phase 0 scope: standard rewrite-rules flush only.
- * P1 will additionally clear scheduled cron events (doc 01 §2.1 cron/).
+ * Deactivation hook (doc 01 §2.2).
+ * Phase 1 scope: rewrite-rules flush + clear the plugin cron schedules.
  */
 
 if (!defined('ABSPATH')) { exit; }
@@ -15,6 +13,8 @@ class Eligius_Sub_Deactivation {
             flush_rewrite_rules();
         }
 
-        // Phase 0: no cron events exist yet to clear.
+        if (class_exists('\\Eligius_Sub\\Cron\\Class_Cron_Manager')) {
+            \Eligius_Sub\Cron\Class_Cron_Manager::unschedule();
+        }
     }
 }

@@ -80,6 +80,14 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // SMS Retriever + SMS User Consent (auto-fill of the OTP code, no READ_SMS permission).
     implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // Subscription client stack (Roadmap P0 deliverable, executed at P1 start
+    // with explicit owner authorization): REST client, JSON, HTTP, encrypted
+    // token storage (doc 06 §3.7 / §7.2). No code changes in this phase.
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // sing-box (libbox), built by the "libbox" job of the GitHub workflow into app/libs/libbox.aar.
     implementation(files("libs/libbox.aar"))
 }

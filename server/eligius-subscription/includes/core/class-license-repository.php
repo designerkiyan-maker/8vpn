@@ -1,0 +1,188 @@
+<?php
+/**
+ * License data access (doc 01 §2.1 core/class-license-repository.php, doc 02 §2.2).
+ */
+
+namespace Eligius_Sub\Core;
+
+defined('ABSPATH') || exit;
+
+class Class_License_Repository extends Class_Repository_Base {
+
+    protected static function table_suffix() {
+        return 'eligius_licenses';
+    }
+
+    /** Latest ACTIVE or TRIAL license of a user (non-expired). */
+    public static function get_current($user_id) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM `{$table}`
+              WHERE user_id = %d
+                AND status IN ('ACTIVE','TRIAL')
+                AND expires_at > %s
+              ORDER BY expires_at DESC, id DESC
+              LIMIT 1",
+            (int) $user_id,
+            Class_UTC_Time::mysql_utc()
+        ));
+    }
+
+    /** ACTIVE/TRIAL license bound to a specific device (doc 04 §5.1). */
+    public static function get_current_for_device($user_id, $device_id) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM `{$table}`
+              WHERE user_id = %d AND device_id = %d
+                AND status IN ('ACTIVE','TRIAL')
+                AND expires_at > %s
+              ORDER BY expires_at DESC, id DESC
+              LIMIT 1",
+            (int) $user_id,
+            (int) $device_id,
+            Class_UTC_Time::mysql_utc()
+        ));
+    }
+
+    /** Any non-expired TRIAL license of the user. */
+    public static function get_active_trial($user_id) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM `{$table}`
+              WHERE user_id = %d AND status = 'TRIAL' AND expires_at > %s
+              ORDER BY expires_at DESC, id DESC LIMIT 1",
+            (int) $user_id,
+            Class_UTC_Time::mysql_utc()
+        ));
+    }
+
+    /** Most recent license row regardless of status (renewal chains). */
+    public static function get_latest($user_id) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM `{$table}` WHERE user_id = %d ORDER BY id DESC LIMIT 1",
+            (int) $user_id
+        ));
+    }
+
+    /** One trial per ACCOUNT (doc 05 §3.2 primary control — any status). */
+    public static function has_trial_ever($user_id) {
+        global $wpdb;
+        $table = self::table();
+        $id = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM `{$table}` WHERE user_id = %d AND source = 'trial' LIMIT 1",
+            (int) $user_id
+        ));
+        return !empty($id);
+    }
+
+    /** Create a license row; returns insert id or 0 on failure. */
+    public static function create(array $data) {
+        $defaults = [
+            'plan_key'      => '',
+            'plan_label'    => '',
+            'duration_days' => 0,
+            'started_at'    => Class_UTC_Time::mysql_utc(),
+            'expires_at'    => Class_UTC_Time::mysql_utc(),
+            'status'        => 'PENDING_PAYMENT',
+            'source'        => 'payment',
+            // Explicit UTC — MySQL CURRENT_TIMESTAMP defaults would use the
+            // server/session timezone instead of UTC (doc 02 §2.2 audit).
+            'created_at'    => Class_UTC_Time::mysql_utc(),
+            'updated_at'    => Class_UTC_Time::mysql_utc(),
+        ];
+        return self::insert_row(array_merge($defaults, $data));
+    }
+
+    /** Update a license row (status transitions, blob storage, binding). */
+    public static function update($license_id, array $data) {
+        return self::update_row($data, ['id' => (int) $license_id]);
+    }
+
+    /** License history of a user (admin + /subscriptions/history later). */
+    public static function list_for_user($user_id, $limit = 50) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM `{$table}` WHERE user_id = %d ORDER BY id DESC LIMIT %d",
+            (int) $user_id,
+            (int) $limit
+        ));
+    }
+
+    /** Revoked license ids for the CRL (doc 04 §8.2). */
+    public static function revoked_ids($limit = 1000) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_col($wpdb->prepare(
+            "SELECT id FROM `{$table}` WHERE status = 'REVOKED' ORDER BY updated_at DESC LIMIT %d",
+            (int) $limit
+        ));
+    }
+
+    /** Licenses whose expiry has passed but status is still ACTIVE/TRIAL (cron sweep). */
+    public static function find_expired_unprocessed($now_mysql, $limit = 500) {
+        global $wpdb;
+        $table = self::table();
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM `{$table}`
+              WHERE status IN ('ACTIVE','TRIAL') AND expires_at <= %s
+              ORDER BY expires_at ASC LIMIT %d",
+            $now_mysql,
+            (int) $limit
+        ));
+    }
+
+    /** Admin listing with filters (doc 03 §8.3). */
+    public static function admin_list($filters = [], $page = 1, $per_page = 20) {
+        global $wpdb;
+        $table = self::table();
+
+        $where  = 'WHERE 1=1';
+        $params = [];
+        if (!empty($filters['user_id'])) {
+            $where   .= ' AND user_id = %d';
+            $params[] = (int) $filters['user_id'];
+        }
+        if (!empty($filters['status'])) {
+            $where   .= ' AND status = %s';
+            $params[] = (string) $filters['status'];
+        }
+        if (!empty($filters['plan_key'])) {
+            $where   .= ' AND plan_key = %s';
+            $params[] = (string) $filters['plan_key'];
+        }
+
+        $offset = max(0, ((int) $page - 1) * (int) $per_page);
+        $sql    = "SELECT * FROM `{$table}` {$where} ORDER BY id DESC LIMIT %d OFFSET %d";
+        array_push($params, (int) $per_page, $offset);
+
+        return $wpdb->get_results($wpdb->prepare($sql, $params));
+    }
+
+    /** Dashboard counters (doc 03 §8 admin stats). */
+    public static function stats() {
+        global $wpdb;
+        $table = self::table();
+        $utc = Class_UTC_Time::mysql_utc();
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT
+                SUM(CASE WHEN status = 'ACTIVE' AND expires_at > %s THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN status = 'TRIAL' AND expires_at > %s THEN 1 ELSE 0 END) AS trials,
+                SUM(CASE WHEN status = 'REVOKED' THEN 1 ELSE 0 END) AS revoked,
+                SUM(CASE WHEN status = 'EXPIRED' THEN 1 ELSE 0 END) AS expired,
+                COUNT(*) AS total
+             FROM `{$table}`",
+            $utc,
+            $utc
+        ), ARRAY_A);
+        if (self::had_error() || null === $row) {
+            return null;
+        }
+        return array_map('intval', $row);
+    }
+}

@@ -37,7 +37,6 @@ class Eligius_Subscription {
 
     private function __construct() {
         $this->init_hooks();
-        $this->init_database();
         $this->load_textdomain();
     }
 
@@ -47,19 +46,11 @@ class Eligius_Subscription {
         register_uninstall_hook(ELIGIUS_SUB_PLUGIN_FILE, [__CLASS__, 'uninstall']);
 
         add_action('plugins_loaded', [$this, 'load_components']);
-        add_action('init', [$this, 'register_rest_routes']);
+        // REST routes register on rest_api_init (WP-correct hook for
+        // register_rest_route; doc 01 §2.2 sketch used 'init').
+        add_action('rest_api_init', [$this, 'register_rest_routes']);
         add_action('admin_menu', [$this, 'register_admin_menu']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
-    }
-
-    /**
-     * P1: compare get_option('eligius_sub_db_version') with ELIGIUS_SUB_DB_VERSION
-     * and run schema migrations (doc 02-DATABASE-DESIGN.md §2).
-     *
-     * Phase 0: no database schema work is authorized.
-     */
-    private function init_database() {
-        // Phase 0: intentionally empty.
     }
 
     public function activate() {
@@ -82,31 +73,67 @@ class Eligius_Subscription {
     }
 
     /**
-     * P1: load core classes (repositories, managers, controllers per doc 01 §2.1).
+     * Load the P1 component wiring (doc 01 §2.1). All classes resolve through
+     * the autoloader; each service registers its own WP hooks in its
+     * constructor (singleton pattern per the doc examples).
      */
     public function load_components() {
-        // Phase 0: no components exist yet.
+        if (wp_installing()) {
+            return; // no hooks during WP install routines
+        }
+
+        // ALL plugin timestamps are stored and compared in UTC (doc 02 §2.2
+        // + audit instruction). The wpdb connection's session timezone must be
+        // UTC so DEFAULT CURRENT_TIMESTAMP / ON UPDATE CURRENT_TIMESTAMP also
+        // produce UTC values; otherwise those columns store the server-local
+        // time (e.g. Asia/Tehran +03:30) and break every UTC comparison.
+        global $wpdb;
+        if (isset($wpdb) && is_object($wpdb)) {
+            $wpdb->query("SET time_zone = '+00:00'");
+        }
+
+        // Services (hook themselves on construction).
+        \Eligius_Sub\Security\Class_Audit_Logger::instance();
+        \Eligius_Sub\Security\Class_Rate_Limiter::instance();
+        \Eligius_Sub\Auth\Class_Auth_Integration::instance();
+        \Eligius_Sub\License\Class_License_Manager::instance();
+        \Eligius_Sub\License\Class_License_Issuer::instance();
+        \Eligius_Sub\License\Class_License_Validator::instance();
+        \Eligius_Sub\License\Class_Trial_Manager::instance();
+        \Eligius_Sub\License\Class_Device_Transfer::instance();
+        \Eligius_Sub\Cron\Class_Cron_Manager::instance();
+
+        // REST controllers (hook rest_api_init) + X-RateLimit-* headers on dispatch.
+        \Eligius_Sub\Api\Class_Api_Controller::boot_rate_headers();
+        \Eligius_Sub\Api\Class_License_Controller::instance();
+        \Eligius_Sub\Api\Class_Device_Controller::instance();
+
+        // Admin pages (hook admin_menu via Class_Admin_Menu).
+        \Eligius_Sub\Admin\Class_Admin_Menu::instance();
     }
 
     /**
-     * P1: register REST API endpoints (doc 03-API-SPECIFICATION.md).
+     * REST routes are registered by the controllers on rest_api_init
+     * (see load_components); kept as the doc §2.2 hook target.
      */
     public function register_rest_routes() {
-        // Phase 0: no operational endpoints are authorized.
+        // Handled by the controllers' own rest_api_init hooks.
     }
 
     /**
-     * P1: register wp-admin menu (doc 08-ADMIN-PANEL-SPECIFICATION.md).
+     * Admin menu is registered by Class_Admin_Menu on admin_menu
+     * (see load_components); kept as the doc §2.2 hook target.
      */
     public function register_admin_menu() {
-        // Phase 0: no admin pages yet.
+        // Handled by Class_Admin_Menu.
     }
 
     /**
-     * P1: enqueue admin assets (assets/css/admin.css, assets/js/admin.js).
+     * P1 skeleton pages use inline styling; asset files arrive with the
+     * dedicated admin UI pass (assets/css/admin.css, assets/js/admin.js).
      */
     public function enqueue_admin_assets() {
-        // Phase 0: no assets exist yet.
+        // Phase 1: no dedicated asset files yet.
     }
 
     public function load_textdomain() {

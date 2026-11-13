@@ -23,11 +23,17 @@ commit cd20410).
 1. Upload the `eligius-subscription` directory to `wp-content/plugins/`.
 2. Activate the plugin through the WordPress Plugins screen.
 
-Note: Phase 0 scaffold only — activating the plugin performs no database
-changes. Tables, options, and cron jobs are introduced in Phase 1.
+Note: activating the plugin creates the eight wp_eligius_* tables (InnoDB),
+seeds default plans, registers cron schedules, and requires the PHP sodium
+extension (Ed25519 signing — doc 04 §4.2).
 
 == Changelog ==
 
 = 1.0.0 =
 * Phase 0 scaffold: plugin skeleton, autoloader, activation/deactivation/
-  uninstall guards, unit test harness, CI pipeline. No business logic yet.
+  uninstall guards, unit test harness, CI pipeline.
+* Phase 1: licensing core — eight-table schema, device registration with
+  one-active-device enforcement (CD-9), 30-day account-keyed trial, license
+  status/validate/offline-entitlement/revocation-list endpoints, Ed25519-signed
+  offline entitlements, device challenge/verify, OTP device transfer, admin
+  dashboard/licences/users/audit-log pages, daily expiry + weekly cleanup cron.
