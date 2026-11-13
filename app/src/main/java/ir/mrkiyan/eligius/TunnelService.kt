@@ -41,6 +41,7 @@ import java.net.Socket
 class TunnelService : VpnService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var job: Job? = null
+    private var licenseTickJob: Job? = null
     private var statsJob: Job? = null
     private var core: CoreProcess? = null
     private var tun: ParcelFileDescriptor? = null
@@ -101,6 +102,7 @@ class TunnelService : VpnService() {
     }
 
     override fun onDestroy() {
+        stopLicenseTick()
         scope.cancel()
         teardownBlocking()
         super.onDestroy()
@@ -120,7 +122,64 @@ class TunnelService : VpnService() {
         networkChanged = false
         psiSlot = 0
         watchNetwork()
-        job = scope.launch { run(s) }
+        job = scope.launch {
+            // ===== LICENSE GATE (Phase 3) — the ONLY modification to the
+            // VPN connect path: auth + device binding (CD-9) + license +
+            // offline entitlement (TimeIntegrity) + revocation. A successful
+            // login alone never authorizes the tunnel.
+            val gate = LicenseStore.ensureValid()
+            if (!gate.isValid) {
+                Engine.lastReason.value = gate.error?.let { reasonText(it) }
+                    ?: "License check failed"
+                Engine.status.value = Status(Phase.IDLE, 0)
+                Engine.log("VPN blocked by license gate: ${gate.error}")
+                return@launch
+            }
+            // Gate passed — start the 5-min license/CRL tick for this session.
+            startLicenseTick()
+            run(s)
+        }
+    }
+
+    /** Periodic license re-validation while the tunnel is UP (CD-5: CRL every
+     *  5 minutes online; Tampered/Expired/Revoked → tunnel stops at the tick). */
+    private fun startLicenseTick() {
+        if (licenseTickJob?.isActive == true) return
+        licenseTickJob = scope.launch {
+            while (isActive && !stopping) {
+                kotlinx.coroutines.delay(LICENSE_TICK_MS)
+                if (stopping || Engine.status.value.phase != Phase.CONNECTED) continue
+                val gate = LicenseStore.ensureValid()
+                if (!gate.isValid) {
+                    Engine.lastReason.value = gate.error?.let { reasonText(it) }
+                        ?: "License check failed"
+                    Engine.log("License no longer valid (${gate.error}) — stopping tunnel (CD-5)")
+                    stopSession()
+                    break
+                }
+            }
+        }
+    }
+
+    private fun stopLicenseTick() {
+        licenseTickJob?.cancel()
+        licenseTickJob = null
+    }
+
+    private fun reasonText(error: String): String = when {
+        error == "NOT_LOGGED_IN" -> "ابتدا وارد حساب خود شوید."
+        error == "DEVICE_NOT_REGISTERED" || error == "DEVICE_NOT_BOUND" ->
+            "دستگاه شما به حساب متصل نیست. ثبت دستگاه لازم است."
+        error == "DEVICE_LIMIT_REACHED" ->
+            "این حساب روی دستگاه دیگری فعال است. انتقال دستگاه با کد پیامکی لازم است."
+        error == "LICENSE_REVOKED" -> "اشتراک شما لغو شده است."
+        error.startsWith("SUBSCRIPTION_EXPIRED") || error == "NO_ACTIVE_LICENSE" || error == "OFFLINE_GRACE_EXPIRED" ->
+            "اشتراک فعال یافت نشد یا منقضی شده است."
+        error.startsWith("TIME_TAMPERING") || error.startsWith("NETWORK_ERROR") -> when {
+            error.startsWith("TIME_TAMPERING") -> "زمان دستگاه قابل اعتبارسنجی نیست — اتصال آنلاین لازم است."
+            else -> "خطای شبکه — پس از اتصال مجدد تلاش کنید."
+        }
+        else -> error
     }
 
     /** Stop button: closes the VPN interface (key icon gone) but leaves the core running. */
@@ -156,6 +215,7 @@ class TunnelService : VpnService() {
     }
 
     private fun stopSession() {
+        stopLicenseTick()
         if (stopping) return
         stopping = true
         Engine.status.value = Status(Phase.STOPPING)
@@ -901,6 +961,7 @@ class TunnelService : VpnService() {
         const val ACTION_PAUSE = "ir.mrkiyan.eligius.PAUSE"
         const val ACTION_RESUME = "ir.mrkiyan.eligius.RESUME"
         private const val SLOW_BPS = 150_000L // below ~150 KB/s the link is treated as unusable
+        private const val LICENSE_TICK_MS = 5 * 60 * 1000L // CD-5: 5-min license/CRL tick
 
         fun pause(ctx: Context) {
             ctx.startService(Intent(ctx, TunnelService::class.java).setAction(ACTION_PAUSE))

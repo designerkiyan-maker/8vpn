@@ -31,8 +31,16 @@ class QsTile : TileService() {
 
     @Suppress("DEPRECATION")
     override fun onClick() {
+        SettingsStore.init(this)
+
         // The tile sits behind the login gate too: without a session it just opens the app.
         if (!AuthStore.isLoggedIn) {
+            startActivityAndCollapse(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
+
+        // License gate (Roadmap P3): cached/offline state only (no network in a tile).
+        if (!LicenseCacheGate.isCachedLicenseUsable(this)) {
             startActivityAndCollapse(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }

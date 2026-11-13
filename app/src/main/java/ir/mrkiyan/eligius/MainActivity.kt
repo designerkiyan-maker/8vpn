@@ -11,6 +11,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.activity.SystemBarStyle
@@ -73,6 +76,12 @@ private fun Root(onLanguageChanged: () -> Unit) {
     val paused by Engine.paused.collectAsStateWithLifecycle()
     val s by SettingsStore.flow.collectAsStateWithLifecycle()
     var screen by rememberSaveable { mutableIntStateOf(if (AuthStore.isLoggedIn) HOME else AUTH) }
+    val scope = rememberCoroutineScope()
+
+    // Phase 3 license gate UI state (docs 06 §5.2 / §3.9).
+    var licenseDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var licenseDialogError by rememberSaveable { mutableStateOf<String?>(null) }
+    var licenseDialogActiveDevice by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
@@ -95,6 +104,7 @@ private fun Root(onLanguageChanged: () -> Unit) {
     BackHandler(enabled = screen == AUTH) { }   // the gate: no backing out of the login screen
     BackHandler(enabled = screen == LOGS) { screen = HOME }
     BackHandler(enabled = screen == SPLIT) { screen = SETTINGS }
+    BackHandler(enabled = screen == PLAN) { screen = HOME }
     // AUTH_WEB: AuthWebScreen registers its own handler (WebView history first).
 
     // The big connect button in the bottom bar: start / stop the tunnel, then land on Home.
@@ -104,12 +114,26 @@ private fun Root(onLanguageChanged: () -> Unit) {
     fun toggleConnect() {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         if (st.phase == Phase.IDLE) {
-            val i = if (s.vpnMode) VpnService.prepare(ctx) else null
-            if (i != null) vpnLauncher.launch(i) else TunnelService.start(ctx)
+            // LICENSE PRE-CHECK (Phase 3 — docs 06 §4.2): the VPN connect is
+            // gated by auth + device binding + license + offline entitlement.
+            // The gate result drives the UI dialog; the tunnel gate in
+            // TunnelService is authoritative either way.
+            scope.launch {
+                val gate = LicenseStore.ensureValid()
+                if (gate.isValid) {
+                    val i = if (s.vpnMode) VpnService.prepare(ctx) else null
+                    if (i != null) vpnLauncher.launch(i) else TunnelService.start(ctx)
+                    screen = HOME
+                } else {
+                    licenseDialogError = gate.error
+                    licenseDialogActiveDevice = gate.activeDeviceId
+                    licenseDialogVisible = true
+                    screen = HOME
+                }
+            }
         } else if (st.phase != Phase.STOPPING) {
             TunnelService.stop(ctx)
         }
-        screen = HOME
     }
 
     val glow = LocalExtra.current.a
@@ -142,10 +166,27 @@ private fun Root(onLanguageChanged: () -> Unit) {
                             AUTH_REGISTER -> AuthRegisterScreen(onBack = { screen = AUTH }, onLogin = { screen = AUTH })
                             AUTH_FORGOT -> AuthForgotScreen(onBack = { screen = AUTH })
                             AUTH_WEB -> AuthWebScreen(onBack = { screen = AUTH })
+                            PLAN -> PlanSelectionScreen(onBack = { screen = HOME })
                         }
                     }
                 }
             }
+        }
+        // Phase 3: license gate dialog (invalid/expired/revoked/limit reached).
+        if (licenseDialogVisible) {
+            LicenseStatusDialog(
+                error = licenseDialogError,
+                activeDeviceId = licenseDialogActiveDevice,
+                onChoosePlan = {
+                    licenseDialogVisible = false
+                    screen = PLAN
+                },
+                onDismiss = {
+                    licenseDialogVisible = false
+                    licenseDialogError = null
+                    licenseDialogActiveDevice = null
+                }
+            )
         }
         if (screen == HOME || screen == CONNECTION || screen == SETTINGS || screen == ACCOUNT) {
             BottomBar(
@@ -174,3 +215,4 @@ private const val AUTH = 6
 private const val AUTH_WEB = 7
 private const val AUTH_REGISTER = 8
 private const val AUTH_FORGOT = 9
+private const val PLAN = 10

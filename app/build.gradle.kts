@@ -15,6 +15,15 @@ android {
         versionCode = 20
         versionName = "1.3.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Embedded Ed25519 license-signing public keys (docs 04 §6.1, 06 §9).
+        // base64 of the RAW 32-byte public keys, per kid; rotated via app updates.
+        // v2 = current server signing key; v1/v3 reserved for rotation.
+        buildConfigField("String", "EMBEDDED_PUBLIC_KEY_V1", "\"\"")
+        buildConfigField("String", "EMBEDDED_PUBLIC_KEY_V2", "\"TvFx8z9/Mf441s+PK7FtHzYTtAocHwONRwRJ9TAYV+Y=\"")
+        buildConfigField("String", "EMBEDDED_PUBLIC_KEY_V3", "\"\"")
+        buildConfigField("int", "MAX_OFFLINE_HOURS", "72")
+        buildConfigField("String", "ELIGIUS_API_BASE", "\"https://wp.mrkiyan.ir/wp-json/eligius/v1/\"")
     }
 
     val ksPath = System.getenv("KEYSTORE_FILE")
@@ -89,6 +98,9 @@ dependencies {
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // Ed25519 entitlement verification on device (docs 06 §3.5 — platform
+    // Ed25519 exists only on API 33+; BouncyCastle covers minSdk 26).
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     // sing-box (libbox), built by the "libbox" job of the GitHub workflow into app/libs/libbox.aar.
     implementation(files("libs/libbox.aar"))
 

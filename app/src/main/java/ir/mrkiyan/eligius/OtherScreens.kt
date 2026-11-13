@@ -252,6 +252,7 @@ fun AccountScreen(back: () -> Unit) {
                 )
             }
             ShareQrCard()
+            DevicesCard()
             Button(
                 onClick = {
                     TunnelService.stop(ctx)   // disconnect before dropping the session

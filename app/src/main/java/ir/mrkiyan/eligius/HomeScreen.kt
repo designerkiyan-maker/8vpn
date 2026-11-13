@@ -86,6 +86,8 @@ private fun fmtRate(b: Long): String = when {
 fun HomeScreen(openLogs: () -> Unit) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    // Phase 3: license state for the expiry banner (Roadmap P3 — <=7 days).
+    val licenseState by LicenseStore.licenseState.collectAsStateWithLifecycle()
     val s by SettingsStore.flow.collectAsStateWithLifecycle()
     val st by Engine.status.collectAsStateWithLifecycle()
     val ping by Engine.pingMs.collectAsStateWithLifecycle()
@@ -141,6 +143,11 @@ fun HomeScreen(openLogs: () -> Unit) {
             kotlinx.coroutines.delay(1000)
         }
     }
+
+
+        // Phase 3: expiry banner when <=7 days remain (Roadmap P3).
+
+        LicenseExpiryBanner(licenseState)
 
     Column(
         Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -483,3 +490,44 @@ private fun InfoColumn(
 }
 
 // RegionDialog / RegionButton / FamilyPanel moved to ConnectionScreen.kt.
+
+
+/**
+ * Phase 3: subscription expiry banner — shown when <=7 days remain (Roadmap
+ * P3 "Home screen shows expiry banner <=7 days"). Read-only; the plan CTA
+ * lives in the license dialog / plan screen.
+ */
+@Composable
+fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
+    if (state == null || !state.valid || state.offline) return
+    val days = state.expiresAt?.let {
+        runCatching {
+            java.time.Duration.between(
+                java.time.Instant.now(),
+                java.time.Instant.parse(it)
+            ).toDays()
+        }.getOrDefault(-1L)
+    } ?: return
+    if (days > 7) return
+    val text = when {
+        days <= 0L -> "اشتراک شما امروز منقضی می‌شود"
+        days == 1L -> "اشتراک شما فردا منقضی می‌شود"
+        else -> "$days روز تا پایان اشتراک"
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(
+                MaterialTheme.colorScheme.tertiaryContainer,
+                RoundedCornerShape(12.dp)
+            )
+            .padding(12.dp)
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer
+        )
+    }
+}

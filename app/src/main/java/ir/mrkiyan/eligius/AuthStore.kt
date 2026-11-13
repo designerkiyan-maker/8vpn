@@ -3,6 +3,7 @@ package ir.mrkiyan.eligius
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
+import ir.mrkiyan.eligius.api.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -51,6 +52,9 @@ object AuthStore {
     )
 
     val flow = MutableStateFlow<Session?>(null)
+
+    /** Current JWT for API layers (null = no token session). */
+    fun sessionToken(): String? = flow.value?.token
     val profile = MutableStateFlow<Profile?>(null)
     val usageServer = MutableStateFlow<UsageServer?>(null)
     val isLoggedIn: Boolean get() = flow.value != null
@@ -362,6 +366,101 @@ object AuthStore {
             }
         }
 
+    /** Minimal JSON string escaping for hand-built payloads. */
+    private fun jsonStr(s: String): String =
+        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    /** Login through the JWT plugin. Returns null when the route is not installed. */
+    private fun jwtLogin(user: String, pass: String): Session? {
+        val payload = "{\"username\":${jsonStr(user)},\"password\":${jsonStr(pass)}}"
+        val con = (URL("$WP_BASE/wp-json/jwt-auth/v1/token").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("User-Agent", "eligius-android")
+            connectTimeout = 10_000
+            readTimeout = 15_000
+        }
+        try {
+            con.outputStream.use { it.write(payload.toByteArray()) }
+            val code = con.responseCode
+            val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                ?.bufferedReader()?.use { it.readText() } ?: ""
+            if (code != 200) return null
+            val j = JSONObject(body)
+            val token = j.optString("token", "")
+            if (token.isEmpty()) return null
+            return Session(
+                user = j.optString("user_display_name", user),
+                username = j.optString("user_nicename", user),
+                email = j.optString("user_email", ""),
+                token = token,
+                exp = (System.currentTimeMillis() / 1000) + 14 * 24 * 3600L
+            ).also {
+                prefs?.edit()
+                    ?.putString("user", it.user)
+                    ?.putString("username", it.username)
+                    ?.putString("email", it.email)
+                    ?.putString("token", token)
+                    ?.putLong("exp", it.exp)
+                    ?.apply()
+                appContext?.let { ctx -> SecureTokenStore.saveToken(ctx, token, it.exp) }
+            }
+        } finally {
+            con.disconnect()
+        }
+    }
+
+    /**
+     * Legacy wp-login.php form fallback (cookie session, no JWT plugin).
+     * Kept for stock-WordPress hosts without the JWT plugin.
+     */
+    private fun formLogin(user: String, pass: String): Session? {
+        val body = StringBuilder().apply {
+            append("log=").append(URLEncoder.encode(user, "UTF-8"))
+            append("&pwd=").append(URLEncoder.encode(pass, "UTF-8"))
+            append("&rememberme=forever")
+            append("&wp-submit=Log+In")
+            append("&redirect_to=").append(URLEncoder.encode("$WP_BASE/", "UTF-8"))
+            append("&testcookie=1")
+        }.toString()
+        val con = (URL("$WP_BASE/wp-login.php").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            instanceFollowRedirects = false
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            setRequestProperty("Cookie", "wordpress_test_cookie=WP%20Cookie%20check")
+            setRequestProperty("User-Agent", "eligius-android")
+            connectTimeout = 10_000
+            readTimeout = 15_000
+        }
+        try {
+            con.outputStream.use { it.write(body.toByteArray()) }
+            val code = con.responseCode
+            val cookies = con.headerFields?.get("Set-Cookie") ?: emptyList()
+            val sessionCookies = cookies.filter { it.startsWith("wordpress_logged_in") }
+            if (code !in 200..302 || sessionCookies.isEmpty()) return null
+            val cookie = sessionCookies.joinToString("; ") { it.substringBefore(';') }
+            return Session(
+                user = user,
+                username = user,
+                email = "",
+                token = null,
+                exp = (System.currentTimeMillis() / 1000) + 14 * 24 * 3600L
+            ).also {
+                prefs?.edit()
+                    ?.putString("user", user)
+                    ?.putString("username", user)
+                    ?.putString("email", "")
+                    ?.putString("cookie", cookie)
+                    ?.putLong("exp", it.exp)
+                    ?.apply()
+            }
+        } finally {
+            con.disconnect()
+        }
+    }
+
     suspend fun login(user: String, pass: String): Result<Session> = withContext(Dispatchers.IO) {
         runCatching {
             jwtLogin(user, pass)   // null when the JWT route does not exist on the server
@@ -373,7 +472,12 @@ object AuthStore {
             val session = result.getOrNull()
             if (session?.token != null) {
                 kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                    // Phase 2: bind the Keystore device (idempotent, once per session).
                     runCatching { ensureDeviceRegistered() }
+                    // Phase 3: fetch the license state right after auth so the UI
+                    // and the VPN gate have it. Never fails the login itself —
+                    // the license gate enforces at connect time.
+                    runCatching { LicenseStore.ensureValid() }
                 }
             }
         }
@@ -400,10 +504,20 @@ object AuthStore {
      * JWT session (guarded by a prefs flag so app restarts with a live
      * session do not re-register). Never throws.
      */
-    private suspend fun ensureDeviceRegistered() {
-        val session = flow.value ?: return
-        val token = session.token ?: return
-        val ctx = appContext ?: return
+
+    internal suspend fun ensureDeviceRegistered() {
+        val session = flow.value ?: run {
+            deviceBinding.value = DeviceBindingState.Failed("no session")
+            return
+        }
+        val token = session.token ?: run {
+            deviceBinding.value = DeviceBindingState.Failed("no JWT (form session)")
+            return
+        }
+        val ctx = appContext ?: run {
+            deviceBinding.value = DeviceBindingState.Failed("not initialized")
+            return
+        }
 
         val exp = session.exp
         if (exp > 0 && prefs?.getLong("device_verified_exp", 0L) ?: 0L >= exp) {
@@ -423,66 +537,50 @@ object AuthStore {
 
         // 1. Does this device already exist for the account?
         runCatching {
-            val con = (URL("$WP_BASE/wp-json/eligius/v1/devices").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("X-Device-Hash", deviceHash)
-                setRequestProperty("User-Agent", "eligius-android")
-                connectTimeout = 10_000
-                readTimeout = 15_000
+            val response = RetrofitClient.deviceApi.listDevices(deviceHash)
+            val data = response.body()?.data
+            if (!response.isSuccessful || data == null) {
+                deviceBinding.value = DeviceBindingState.Failed(
+                    "devices list HTTP " + response.code() + ": " + (RetrofitClient.errorMessage(response) ?: "")
+                )
+                return
             }
-            try {
-                val code = con.responseCode
-                val body = (if (code in 200..299) con.inputStream else con.errorStream)
-                    ?.bufferedReader()?.use { it.readText() } ?: ""
-                val j = JSONObject(body)
-                if (code != 200) return
-                val devices = j.optJSONObject("data")?.optJSONArray("devices")
-                var mine: JSONObject? = null
-                if (devices != null) {
-                    for (i in 0 until devices.length()) {
-                        val d = devices.optJSONObject(i) ?: continue
-                        if (d.optString("device_hash") == deviceHash) { mine = d; break }
-                    }
-                }
-                val activeId = j.optJSONObject("data")?.optLong("active_device_id", 0L) ?: 0L
+            val mine = data.devices.firstOrNull { it.deviceHash == deviceHash }
+            val activeId = data.activeDeviceId ?: 0L
 
-                when {
-                    mine != null && mine.optBoolean("is_active", false) -> {
-                        // 2a. Already bound+active: prove ownership once, done.
-                        val ok = verifyDeviceChallenge().getOrDefault(false)
-                        deviceBinding.value = if (ok) {
-                            if (exp > 0) prefs?.edit()?.putLong("device_verified_exp", exp)?.apply()
-                            DeviceBindingState.Verified
-                        } else {
-                            DeviceBindingState.Failed("challenge verification failed")
-                        }
-                        return
+            when {
+                mine != null && mine.isActive -> {
+                    // 2a. Already bound+active: prove ownership once, done.
+                    val ok = verifyDeviceChallenge().getOrDefault(false)
+                    deviceBinding.value = if (ok) {
+                        if (exp > 0) prefs?.edit()?.putLong("device_verified_exp", exp)?.apply()
+                        DeviceBindingState.Verified
+                    } else {
+                        DeviceBindingState.Failed("challenge verification failed")
                     }
-                    mine == null && activeId > 0L -> {
-                        // 2b. Another device occupies the slot (CD-9) — the OTP
-                        //     transfer flow (P3 UI) is the only way forward.
-                        deviceBinding.value = DeviceBindingState.LimitReached(activeId)
-                        return
-                    }
-                    // mine == null && no active device → fall through to register
-                    // mine != null && !active → stale row; register path surfaces
-                    //                          the server's CONFLICT detail
+                    return
                 }
-            } finally {
-                con.disconnect()
+                mine == null && activeId > 0L -> {
+                    // 2b. Another device occupies the slot (CD-9) — the OTP
+                    //     transfer flow (P3 UI) is the only way forward.
+                    deviceBinding.value = DeviceBindingState.LimitReached(activeId)
+                    return
+                }
+                // mine == null && no active device → fall through to register
+                // mine != null && !active → stale row; register path surfaces
+                //                          the server's CONFLICT detail
             }
-        }.getOrDefault(Unit)
+        }.onFailure {
+            deviceBinding.value = DeviceBindingState.Failed("devices list: " + (it.message ?: ""))
+            return
+        }
 
         // 2c. Register the device (first time for this account, or no slot taken).
         val registered = registerDevice("Android")
         if (registered.isFailure) {
-            val msg = (registered.exceptionOrNull() as? AuthException)?.uiMessage
-            val con409 = registered.exceptionOrNull()?.message?.contains("DEVICE_LIMIT") == true
-            deviceBinding.value = if (con409)
-                DeviceBindingState.LimitReached(0L)
-            else
-                DeviceBindingState.Failed(msg)
+            deviceBinding.value = DeviceBindingState.Failed(
+                (registered.exceptionOrNull() as? AuthException)?.uiMessage ?: "register failed"
+            )
             return
         }
 
@@ -496,173 +594,6 @@ object AuthStore {
         }
     }
 
-    /** Login through the JWT plugin. Returns null when the route is not installed. */
-    private fun jwtLogin(user: String, pass: String): Session? {
-        val payload = "{\"username\":${jsonStr(user)},\"password\":${jsonStr(pass)}}"
-        val con = (URL("$WP_BASE/wp-json/jwt-auth/v1/token").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            setRequestProperty("Content-Type", "application/json")
-            connectTimeout = 10_000
-            readTimeout = 15_000
-        }
-        try {
-            con.outputStream.use { it.write(payload.toByteArray()) }
-            val code = con.responseCode
-            val body = (if (code in 200..299) con.inputStream else con.errorStream)
-                ?.bufferedReader()?.use { it.readText() } ?: ""
-            if (body.contains("rest_no_route")) return null   // plugin missing → form fallback
-            val j = JSONObject(body)
-            if (code != 200) {
-                throw AuthException(
-                    j.optJSONObject("data")?.optString("message")?.takeIf { it.isNotEmpty() }
-                        ?: j.optString("message").takeIf { it.isNotEmpty() }
-                )
-            }
-            val token = j.optString("token")
-            val data = j.optJSONObject("data")
-            val name = data?.optString("user_display_name")?.takeIf { it.isNotEmpty() } ?: user
-            val email = data?.optString("user_email")?.takeIf { it.isNotEmpty() } ?: ""
-            return save(Session(name, user, email, token.ifEmpty { null }, jwtExp(token)))
-        } finally {
-            con.disconnect()
-        }
-    }
-
-    /** Login through the classic wp-login.php form — works on a stock WordPress, no plugins. */
-    private fun formLogin(user: String, pass: String): Session? {
-        val body = "log=${URLEncoder.encode(user, "UTF-8")}" +
-            "&pwd=${URLEncoder.encode(pass, "UTF-8")}" +
-            "&wp-submit=Log+In" +
-            "&redirect_to=${URLEncoder.encode("$WP_BASE/", "UTF-8")}" +
-            "&testcookie=1"
-        val con = (URL("$WP_BASE/wp-login.php").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            instanceFollowRedirects = false
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            setRequestProperty("Cookie", "wordpress_test_cookie=WP%20Cookie%20check")
-            connectTimeout = 10_000
-            readTimeout = 15_000
-        }
-        try {
-            con.outputStream.use { it.write(body.toByteArray()) }
-            val code = con.responseCode
-            val cookies = con.headerFields?.get("set-cookie")?.joinToString("; ") ?: ""
-            if (cookies.contains("wordpress_logged_in")) {
-                // 14 days, the same lifetime WordPress gives "remember me" sessions.
-                return save(Session(user, user, "", null, System.currentTimeMillis() / 1000 + 14 * 24 * 3600L))
-            }
-            val html = (if (code in 200..299) con.inputStream else con.errorStream)
-                ?.bufferedReader()?.use { it.readText() } ?: ""
-            throw AuthException(extractWpError(html))
-        } finally {
-            con.disconnect()
-        }
-    }
-
-    /** Pulls the human-readable error out of the failed login page, when present. */
-    private fun extractWpError(html: String): String? = try {
-        Regex("<div[^>]*id=\"login_error\"[^>]*>(.*?)</div>", RegexOption.DOT_MATCHES_ALL)
-            .find(html)?.groupValues?.get(1)
-            ?.replace(Regex("<[^>]+>"), " ")
-            ?.trim()
-            ?.take(200)
-            ?.takeIf { it.isNotEmpty() }
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun jwtExp(token: String): Long = try {
-        val payload = String(
-            Base64.decode(token.split(".")[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-        )
-        JSONObject(payload).optLong("exp", 0L)
-    } catch (_: Exception) {
-        0L
-    }
-
-    private fun save(s: Session): Session {
-        flow.value = s
-        prefs?.edit()
-            ?.putString("user", s.user)
-            ?.putString("username", s.username)
-            ?.putString("email", s.email)
-            ?.putString("token", s.token)
-            ?.putLong("exp", s.exp)
-            ?.apply()
-        return s
-    }
-
-    private fun jsonStr(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-
-    /**
-     * Registers a new account via the Eligius register endpoint
-     * (server/eligius-register.php on the WordPress host):
-     * POST /wp-json/eligius/v1/register — mobile doubles as the username,
-     * mobile + national code are stored as user meta. Auto-login on success.
-     */
-    suspend fun register(
-        firstName: String,
-        lastName: String,
-        email: String,
-        mobile: String,
-        nationalCode: String,
-        password: String
-    ): Result<Session> = withContext(Dispatchers.IO) {
-        runCatching {
-            val payload = JSONObject().apply {
-                put("username", mobile)
-                put("email", email)
-                put("password", password)
-                put("first_name", firstName)
-                put("last_name", lastName)
-                put("mobile", mobile)
-                put("national_code", nationalCode)
-            }.toString()
-
-            val con = (URL("$WP_BASE/wp-json/eligius/v1/register").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("User-Agent", "eligius-android")
-                connectTimeout = 10_000
-                readTimeout = 15_000
-            }
-            try {
-                con.outputStream.use { it.write(payload.toByteArray()) }
-                val code = con.responseCode
-                val body = (if (code in 200..299) con.inputStream else con.errorStream)
-                    ?.bufferedReader()?.use { it.readText() } ?: ""
-                if (body.contains("rest_no_route")) {
-                    // The server/eligius-register.php mu-plugin is not installed on the host yet.
-                    throw AuthException(
-                        "Registration service is not ready. / سرویس ثبت‌نام هنوز روی سرور فعال نیست."
-                    )
-                }
-                val j = JSONObject(body)
-                if (code != 200) {
-                    throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
-                }
-                login(mobile, password).getOrElse {
-                    Session(mobile, mobile, email, null, 0L)   // account exists; user signs in
-                }
-            } finally {
-                con.disconnect()
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Phase 2 — device binding (CD-10: Keystore ECDSA P-256)
-    // ------------------------------------------------------------------
-
-    /** Current Keystore device hash (creates the keypair on first use). */
-    fun deviceHash(): String {
-        val ctx = appContext ?: error("AuthStore.init(context) not called")
-        return DeviceIdentity.getDeviceHash(ctx)
-    }
-
     /**
      * Registers the current Keystore device with the backend.
      * Requires an authenticated JWT session; one-active-device policy is
@@ -673,36 +604,22 @@ object AuthStore {
         withContext(Dispatchers.IO) {
             runCatching {
                 val ctx = appContext ?: error("AuthStore.init(context) not called")
-                val token = flow.value?.token ?: error("no JWT session")
+                flow.value?.token ?: error("no JWT session")
                 val deviceHash = DeviceIdentity.getDeviceHash(ctx)
-                val payload = org.json.JSONObject()
-                    .put("public_key", DeviceIdentity.getPublicKeyPem(ctx))
-                    .put("fingerprint", deviceHash)
-                    .put("label", label)
-                    .toString()
-                val con = (URL("$WP_BASE/wp-json/eligius/v1/devices/register").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("X-Device-Hash", deviceHash)
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("User-Agent", "eligius-android")
-                    connectTimeout = 10_000
-                    readTimeout = 15_000
+                val response = RetrofitClient.deviceApi.registerDevice(
+                    mapOf(
+                        "public_key" to DeviceIdentity.getPublicKeyPem(ctx),
+                        "fingerprint" to deviceHash,
+                        "label" to label
+                    )
+                )
+                if (!response.isSuccessful) {
+                    throw AuthException(RetrofitClient.errorMessage(response))
                 }
-                try {
-                    con.outputStream.use { it.write(payload.toByteArray()) }
-                    val code = con.responseCode
-                    val body = (if (code in 200..299) con.inputStream else con.errorStream)
-                        ?.bufferedReader()?.use { it.readText() } ?: ""
-                    val j = JSONObject(body)
-                    if (code !in 200..299) {
-                        throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
-                    }
-                    j.optString("device_id", "")
-                } finally {
-                    con.disconnect()
-                }
+                val data = response.body()?.data
+                val id = (data?.get("device_id") as? Double)?.toInt()?.toString()
+                    ?: (data?.get("device_id")?.toString() ?: "")
+                id
             }
         }
 
@@ -713,63 +630,42 @@ object AuthStore {
     suspend fun verifyDeviceChallenge(): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
             val ctx = appContext ?: error("AuthStore.init(context) not called")
-            val token = flow.value?.token ?: error("no JWT session")
+            flow.value?.token ?: error("no JWT session")
             val deviceHash = DeviceIdentity.getDeviceHash(ctx)
 
             // 1. Request challenge
-            val chalCon = (URL("$WP_BASE/wp-json/eligius/v1/devices/challenge").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("X-Device-Hash", deviceHash)
-                setRequestProperty("Content-Type", "application/json")
-                connectTimeout = 10_000
-                readTimeout = 15_000
+            val chalResponse = RetrofitClient.deviceApi.getChallenge(
+                deviceHash, mapOf("device_hash" to deviceHash)
+            )
+            if (!chalResponse.isSuccessful) {
+                throw AuthException(RetrofitClient.errorMessage(chalResponse))
             }
-            val challenge: String
-            try {
-                chalCon.outputStream.use {
-                    it.write(org.json.JSONObject().put("device_hash", deviceHash).toString().toByteArray())
-                }
-                val code = chalCon.responseCode
-                val body = (if (code in 200..299) chalCon.inputStream else chalCon.errorStream)
-                    ?.bufferedReader()?.use { it.readText() } ?: ""
-                val j = JSONObject(body)
-                if (code !in 200..299) throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
-                challenge = j.optString("challenge")
-            } finally {
-                chalCon.disconnect()
-            }
+            val challenge = chalResponse.body()?.data?.challenge
+                ?: error("empty challenge")
 
             // 2. Sign the challenge with the Keystore key
             val signature = DeviceIdentity.signChallenge(ctx, challenge.toByteArray())
 
             // 3. Verify on the server
-            val verCon = (URL("$WP_BASE/wp-json/eligius/v1/devices/verify").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("X-Device-Hash", deviceHash)
-                setRequestProperty("Content-Type", "application/json")
-                connectTimeout = 10_000
-                readTimeout = 15_000
+            val verResponse = RetrofitClient.deviceApi.verifyDevice(
+                deviceHash,
+                mapOf(
+                    "device_hash" to deviceHash,
+                    "challenge" to challenge,
+                    "signature" to signature
+                )
+            )
+            if (!verResponse.isSuccessful) {
+                throw AuthException(RetrofitClient.errorMessage(verResponse))
             }
-            try {
-                val payload = org.json.JSONObject()
-                    .put("device_hash", deviceHash)
-                    .put("challenge", challenge)
-                    .put("signature", signature)
-                    .toString()
-                verCon.outputStream.use { it.write(payload.toByteArray()) }
-                val code = verCon.responseCode
-                val body = (if (code in 200..299) verCon.inputStream else verCon.errorStream)
-                    ?.bufferedReader()?.use { it.readText() } ?: ""
-                val j = JSONObject(body)
-                if (code !in 200..299) throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
-                j.optBoolean("verified", false)
-            } finally {
-                verCon.disconnect()
-            }
+            verResponse.body()?.data?.verified ?: false
         }
     }
+
+    /** Current Keystore device hash (creates the keypair on first use). */
+    fun deviceHash(): String {
+        val ctx = appContext ?: error("AuthStore.init(context) not called")
+        return DeviceIdentity.getDeviceHash(ctx)
+    }
+
 }

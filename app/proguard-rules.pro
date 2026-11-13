@@ -10,3 +10,15 @@
 -keep class io.nekohasekai.** { *; }
 -dontwarn go.**
 -dontwarn io.nekohasekai.**
+
+# --- Eligius subscription stack (docs 06 §8) ---
+-keep class com.squareup.moshi.** { *; }
+-keep class com.squareup.retrofit2.** { *; }
+-keep interface retrofit2.** { *; }
+-keep class com.squareup.okhttp3.** { *; }
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+-keep class androidx.security.crypto.** { *; }
+-keep class org.bouncycastle.** { *; }
+-keep class ir.mrkiyan.eligius.api.model.** { *; }
+-keep class ir.mrkiyan.eligius.api.** { *; }
