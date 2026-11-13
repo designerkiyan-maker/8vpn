@@ -20,7 +20,7 @@ use Eligius_Sub\Core\Class_Audit_Log_Repository;
 use Eligius_Sub\Core\Class_Device_Repository;
 use Eligius_Sub\Core\Class_UTC_Time;
 use Eligius_Sub\License\Class_Device_Transfer;
-use Eligius_Sub\License\Class_License_Validator;
+use Eligius_Sub\Auth\Class_Device_Auth;
 use Eligius_Sub\Security\Class_Rate_Limiter;
 
 class Class_Device_Controller extends Class_Api_Controller {
@@ -244,7 +244,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             return $exceeded;
         }
 
-        $challenge = Class_License_Validator::instance()->create_challenge(
+        $challenge = Class_Device_Auth::instance()->create_challenge(
             get_current_user_id(),
             (string) $device->device_hash
         );
@@ -273,7 +273,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         $challenge = (string) $request->get_param('challenge');
         $signature = (string) $request->get_param('signature');
 
-        $result = Class_License_Validator::instance()->verify_challenge(
+        $result = Class_Device_Auth::instance()->verify_challenge(
             get_current_user_id(),
             $device_hash,
             $challenge,

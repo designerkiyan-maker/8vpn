@@ -196,11 +196,11 @@ function verify_device_challenge($device_hash, $challenge_b64, $signature_b64) {
 }
 ```
 
-### 2.4 Signature Algorithm Choice — Technical Proposal (NOT YET Owner-Confirmed)
+### 2.4 Signature Algorithm Choice — CONFIRMED DECISION (CD-10, formerly TD-8)
 
-> **Status:** The device-binding *requirement* — one active device per user, server-verified binding via challenge-response — is **CONFIRMED**. The specific cryptographic mechanism below (Android Keystore ECDSA P-256) is a **technical proposal** awaiting formal owner confirmation (see `09-FINAL-DESIGN-REPORT.md` → TD-8).
+> **Status:** **CONFIRMED by the owner on 2026-11-13.** The device-binding signature mechanism is **Android Keystore ECDSA P-256 (NIST secp256r1)** with `SHA256withECDSA` signatures. Server license signing remains **Ed25519 (sodium)** — independent responsibility, not interchangeable (see §4.2). Hardware attestation is **not** required and Keystore generation must not be presented as proof of hardware-backed storage.
 
-**Proposal: Android Keystore + ECDSA P-256 (NIST secp256r1), SHA256withECDSA signatures.**
+**Decision: Android Keystore + ECDSA P-256 (secp256r1), SHA256withECDSA signatures.**
 
 Why this mechanism fits device binding:
 
@@ -212,11 +212,11 @@ Why this mechanism fits device binding:
 | No extra permissions | Uses the platform Keystore; no READ_PHONE_STATE, no IMEI, no device identifiers |
 | Server verification | Standard PHP `openssl_verify()` — no exotic dependencies |
 
-**Alternatives evaluated:**
+**Alternatives evaluated (documented for the record):**
 
 | Alternative | Verdict | Reason |
 |-------------|---------|--------|
-| Ed25519 (Keystore) | Not portable as primary | Keystore Ed25519 exists only on API 28+ via Conscrypt and is device-dependent. Optional runtime upgrade: prefer Ed25519 when the device advertises it, fall back to P-256 |
+| Ed25519 (Keystore) | Not chosen as primary | Keystore Ed25519 exists only on API 28+ via Conscrypt and is device-dependent. May be revisited as an optional runtime upgrade |
 | RSA-2048 | Rejected | 256-byte signatures, slower key generation, no security advantage over P-256 at this scale |
 | HMAC shared secret | Rejected | The secret must live on the client → extractable on rooted devices → strictly weaker than asymmetric challenge-response |
 | Play Integrity API | Rejected as binding primitive | Requires Google Play Services + a network round-trip per check — unreliable in the target market. Usable later as an optional *additional signal*, not as the binding mechanism |
@@ -770,8 +770,8 @@ function build_license_response($license, $device_id, $has_offline) {
 │    ├── Device Challenge Key (ECDSA P-256) ──► Per-install      │
 │    │                                                            │
 │    └── Android Keystore (per device)                            │
-│         └── Device Identity Key (Ed25519/ECDSA P-256)          │
-│              ├── Private: Non-exportable, hw-backed            │
+│         └── Device Identity Key (ECDSA P-256 — CD-10)          │
+│              ├── Private: Non-exportable (hw/software varies)  │
 │              └── Public: Registered with server                │
 │                                                                 │
 │  Rotation Policy:                                               │

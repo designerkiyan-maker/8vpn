@@ -292,28 +292,40 @@ import com.google.android.gms.common.api.Status
 import java.nio.charset.StandardCharsets
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import android.content.Context
+import android.provider.Settings
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.Signature
 import java.security.spec.ECGenParameterSpec
-import javax.crypto.Cipher
 
 /**
- * Device Identity & Registration (Stage 21) — Keystore-backed device identity.
- * 
- * - Generates ECDSA P-256 keypair in Android Keystore (non-exportable, hardware-backed)
- * - Computes device_hash = SHA-256(pubkey_der || ANDROID_ID)
- * - Handles SMS Retriever + User Consent for OTP auto-fill
- * - Provides challenge-response signing for server verification
+ * Device Identity & Registration (Phase 2 — CD-10) — Keystore-backed device identity.
+ *
+ * Confirmed mechanism: Android Keystore ECDSA P-256 (secp256r1).
+ *   - private key is generated inside the Keystore and is NON-EXPORTABLE
+ *   - device_hash = SHA-256(pubkey_der || ANDROID_ID)
+ *   - ownership proof = signing the server challenge with SHA256withECDSA
+ *
+ * NOTE (CD-10): generation inside the Keystore must NOT be presented as proof
+ * of hardware-backed storage (TEE/StrongBox varies; software Keystore is
+ * acceptable on emulators).
  */
 object DeviceIdentity {
 
-    private const val TAG = "DeviceIdentity"
     private const val KEY_ALIAS = "eligius_device_identity"
     private const val KEY_ALGORITHM = "EC"
     private const val KEY_SPEC = "secp256r1"
-    
-    /** Device hash = SHA-256(public_key_der || ANDROID_ID) */
-    fun getDeviceHash(context: Context): String? {
+    private const val SIGN_ALGORITHM = "SHA256withECDSA"
+    private const val KEYSTORE = "AndroidKeyStore"
+
+    /** device_hash = SHA-256(pubkey_der || ANDROID_ID), lowercase hex. */
+    fun getDeviceHash(context: Context): String {
         val keyPair = getOrCreateKeyPair(context)
         val androidId = getAndroidId(context)
         val pubKeyDer = keyPair.public.encoded
@@ -322,90 +334,78 @@ object DeviceIdentity {
         System.arraycopy(androidId.toByteArray(), 0, input, pubKeyDer.size, androidId.toByteArray().size)
         return sha256Hex(input)
     }
-    
+
+    /** Public key as a PEM "PUBLIC KEY" block (SubjectPublicKeyInfo DER). */
     fun getPublicKeyPem(context: Context): String {
         val keyPair = getOrCreateKeyPair(context)
-        val pubKey = keyPair.public
-        val writer = java.io.StringWriter()
-        val pemWriter = org.bouncycastle.openssl.PemWriter(java.io.StringWriter())
-        pemWriter.writeObject(org.bouncycastle.openssl.PemObject("PUBLIC KEY", keyPair.public.encoded))
-        pemWriter.close()
-        return writer.toString()
+        return derToPem(keyPair.public.encoded)
     }
-    
+
+    /**
+     * Sign [data] with the device private key.
+     * The signature is DER-encoded ECDSA (as produced by SHA256withECDSA),
+     * which PHP openssl_verify accepts directly.
+     */
     fun sign(context: Context, data: ByteArray): ByteArray {
         val privateKey = getPrivateKey(context)
-        val signature = java.security.Signature.getInstance("SHA256withECDSA").apply {
+        return Signature.getInstance(SIGN_ALGORITHM).apply {
             initSign(privateKey)
             update(data)
-        }
-        return signature.sign()
+        }.sign()
     }
-    
-    fun getPublicKeyPem(context: Context): String {
-        val keyPair = getOrCreateKeyPair(context)
-        val pubKey = keyPair.public
-        val writer = java.io.StringWriter()
-        val pemWriter = org.bouncycastle.openssl.PemWriter(java.io.StringWriter())
-        pemWriter.writeObject(org.bouncycastle.openssl.PemObject("PUBLIC KEY", keyPair.public.encoded))
-        pemWriter.close()
-        return writer.toString()
+
+    /** Sign the server challenge and return base64 (DER) signature. */
+    fun signChallenge(context: Context, challenge: ByteArray): String {
+        val der = sign(context, challenge)
+        return Base64.encodeToString(der, Base64.NO_WRAP)
     }
-    
+
     private fun getOrCreateKeyPair(context: Context): KeyPair {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        
+        val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
         if (keyStore.containsAlias(KEY_ALIAS)) {
-            val privateKey = keyStore.getKey(KEY_ALIAS, null) as java.security.PrivateKey
-            val certificate = keyStore.getCertificate(KEY_ALIAS)
-            return KeyPair(certificate.publicKey, privateKey)
+            val entry = keyStore.getEntry(KEY_ALIAS, null) as KeyStore.PrivateKeyEntry
+            return KeyPair(entry.certificate.publicKey, entry.privateKey)
         }
-        
-        // Generate new key pair
-        val keyPairGenerator = KeyPairGenerator.getInstance(KEY_ALGORITHM, "AndroidKeyStore")
-        val keyGenParameterSpec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY
-        ).apply {
-            setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-            setDigests(KeyProperties.DIGEST_SHA256)
-            setUserAuthenticationRequired(false)
-            setAttestationChallenge(null)
-        }.build()
-        
-        keyPairGenerator.initialize(keyGenParameterSpec)
-        return keyPairGenerator.generateKeyPair()
+        val generator = KeyPairGenerator.getInstance(KEY_ALGORITHM, KEYSTORE)
+        val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_SIGN)
+            .setAlgorithmParameterSpec(ECGenParameterSpec(KEY_SPEC))
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .build()
+        generator.initialize(spec)
+        return generator.generateKeyPair()
     }
-    
+
     private fun getPrivateKey(context: Context): java.security.PrivateKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        return keyStore.getKey(KEY_ALIAS, null) as java.security.PrivateKey
+        val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+        val entry = keyStore.getEntry(KEY_ALIAS, null) as KeyStore.PrivateKeyEntry
+        return entry.privateKey
     }
-    
-    fun getPublicKey(context: Context): java.security.PublicKey {
-        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        return keyStore.getCertificate(KEY_ALIAS).publicKey
-    }
-    
-    fun getDeviceHashHex(context: Context): String = getDeviceHash(context)!!
-    
-    fun getPublicKeyPem(context: Context): String {
-        val keyPair = getOrCreateKeyPair(context)
-        val writer = java.io.StringWriter()
-        val pemWriter = org.bouncycastle.openssl.PemWriter(java.io.StringWriter())
-        pemWriter.writeObject(org.bouncycastle.openssl.PemObject("PUBLIC KEY", keyPair.public.encoded))
-        pemWriter.close()
-        return writer.toString()
-    }
-    
+
     private fun getAndroidId(context: Context): String {
-        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
+        return Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
     }
-    
+
     private fun sha256Hex(input: ByteArray): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(input)
-        return input.joinToString("") { "%02x".format(it) }
+        val digest = MessageDigest.getInstance("SHA-256").digest(input)
+        val sb = StringBuilder(digest.size * 2)
+        for (b in digest) sb.append(String.format("%02x", b))
+        return sb.toString()
     }
+
+    private fun derToPem(der: ByteArray): String {
+        val b64 = Base64.encodeToString(der, Base64.NO_WRAP)
+        val sb = StringBuilder()
+        sb.append("-----BEGIN PUBLIC KEY-----\n")
+        var i = 0
+        while (i < b64.length) {
+            val end = minOf(i + 64, b64.length)
+            sb.append(b64, i, end).append('\n')
+            i = end
+        }
+        sb.append("-----END PUBLIC KEY-----")
+        return sb.toString()
+    }
+}
     
     /** Sign challenge with device private key */
     fun signChallenge(context: Context, challengeBase64: String): String {

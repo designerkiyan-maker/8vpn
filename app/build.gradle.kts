@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         versionCode = 20
         versionName = "1.3.11"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val ksPath = System.getenv("KEYSTORE_FILE")
@@ -90,4 +91,8 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     // sing-box (libbox), built by the "libbox" job of the GitHub workflow into app/libs/libbox.aar.
     implementation(files("libs/libbox.aar"))
+
+    // Instrumented tests (Phase 2 — Android Keystore ECDSA device binding).
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

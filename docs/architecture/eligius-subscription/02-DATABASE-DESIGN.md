@@ -184,7 +184,7 @@ erDiagram
 | `id` | `BIGINT UNSIGNED` | PK, AI | Primary key |
 | `user_id` | `BIGINT UNSIGNED` | NOT NULL, FK → `wp_users.ID` | WordPress user |
 | `device_hash` | `CHAR(64)` | NOT NULL, UNIQUE | SHA-256(device_pubkey ‖ ANDROID_ID) |
-| `public_key` | `TEXT` | NOT NULL | Ed25519/P-256 public key (PEM) |
+| `public_key` | `TEXT` | NOT NULL | ECDSA P-256 public key (PEM) — device binding per CD-10 |
 | `label` | `VARCHAR(64)` | DEFAULT '' | User-visible name |
 | `is_active` | `TINYINT(1)` | NOT NULL DEFAULT 1 | Active status |
 | `created_at` | `DATETIME` | NOT NULL DEFAULT CURRENT_TIMESTAMP | Registration time |

@@ -845,11 +845,11 @@ class Eligius_Sub_Database {
 |-------|-----------|
 | **Transport** | TLS 1.2+ (enforced by server) |
 | **Authentication** | JWT (RS256) via `wp-json/jwt-auth/v1/token` |
-| **Device Identity** | Android Keystore ECDSA P-256, non-exportable *(proposed mechanism — TD-8)* |
-| **Device Binding** | Server-verified challenge-response (ECDSA P-256) *(proposed mechanism — TD-8)* |
+| **Device Identity** | Android Keystore ECDSA P-256 (secp256r1), non-exportable *(CONFIRMED — CD-10)* |
+| **Device Binding** | Server-verified challenge-response (ECDSA P-256, SHA256withECDSA) *(CONFIRMED — CD-10)* |
 | **One Active Device** | Server-side enforcement with row-level locking (`FOR UPDATE`) — applies to trial AND paid plans; transfer via OTP deactivates the old device |
 | **License Validation** | Online (JWT) + Offline (signed entitlement blob, 72h max) |
-| **License Signing** | Ed25519 or ECDSA P-256, private key only on server |
+| **License Signing** | Ed25519 (sodium), private key only on server — independent from device binding (CD-10) |
 | **Payment Verification** | Server-to-Server (S2S) with gateway API + HMAC |
 | **Rate Limiting** | Per-IP, per-user, per-endpoint (WP transient + DB) |
 | **Audit Logging** | Immutable append-only `eligius_audit_logs` table |
@@ -907,6 +907,12 @@ The following decisions have been explicitly approved by the owner and must be r
 - The backend enforces this **server-side with concurrency control** (`SELECT … FOR UPDATE` on the user's device/license rows) so two devices can never simultaneously bind to the same account — see 02-DATABASE-DESIGN.md §2.8
 - Enforcement point: license/device validation on every connect and every periodic tick — an unauthorized second device is rejected with `DEVICE_LIMIT_REACHED`
 
+### Device Binding Mechanism (CD-10)
+- **Confirmed (owner, TD-8 resolution):** device identity uses **Android Keystore ECDSA P-256 (secp256r1)** — the private key is generated and held inside the Keystore and is **non-exportable**; the public key is registered with the backend; ownership is proven by signing a server-issued challenge with `SHA256withECDSA`; the server verifies the signature with the stored public key
+- The signature algorithm and format are interoperable between Android Keystore and PHP OpenSSL (`openssl_verify`, SHA-256 digest, DER-encoded ECDSA signature)
+- **Ed25519 remains the server license-signing algorithm** (license/offline entitlement) — the two algorithms have independent responsibilities and are NOT interchangeable (see 04-SECURITY-AND-LICENSE.md §2.4/§4.2)
+- **Hardware attestation is NOT required.** Device-key generation inside Android Keystore must NOT be claimed as proof of hardware-backed key storage (TEE/StrongBox varies by device and emulator; software Keystore is acceptable)
+
 ---
 
 ## 7. Remaining Technical Decisions
@@ -916,9 +922,9 @@ The canonical list of remaining technical decisions (TD-1 … TD-10) is maintain
 | # | Decision | Status |
 |---|----------|--------|
 | TD-2 | Payment currency unit (IRT vs IRR at gateway) | Blocking P4 |
-| TD-4 | License signing algorithm — Ed25519 (sodium) vs ECDSA fallback | Blocking P1 — verify `sodium` on host |
 | TD-6 | ZarinPal merchant account (sandbox/production) | Blocking P4 — owner action |
-| TD-8 | Device-binding signature mechanism (ECDSA P-256 is a **proposal**, not yet owner-confirmed) | Blocking P2 |
+
+**Resolved:** TD-8 was the last remaining pre-P2 decision — the owner confirmed **ECDSA P-256 (Android Keystore) for device binding** on 2026-11-13, recorded as **CD-10** in §6. TD-4 (sodium on host) was verified resolved in Phase 1.
 
 All previously listed "open" items that the owner has since confirmed (gateway order, login model, offline grace, admin panel location, trial duration/binding) have been moved to §6 Confirmed Decisions and are no longer decisions.
 

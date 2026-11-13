@@ -98,6 +98,7 @@ class Eligius_Subscription {
         \Eligius_Sub\Auth\Class_Auth_Integration::instance();
         \Eligius_Sub\License\Class_License_Manager::instance();
         \Eligius_Sub\License\Class_License_Issuer::instance();
+        \Eligius_Sub\Auth\Class_Device_Auth::instance();
         \Eligius_Sub\License\Class_License_Validator::instance();
         \Eligius_Sub\License\Class_Trial_Manager::instance();
         \Eligius_Sub\License\Class_Device_Transfer::instance();

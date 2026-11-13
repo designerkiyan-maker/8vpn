@@ -102,7 +102,9 @@ class Class_License_Validator {
 
     /**
      * Verify $signature over $data with the stored PEM public key.
-     * Detects Ed25519 (DER prefix 302a300506032b6570032100) vs EC P-256.
+     * CD-10: the ONLY permitted device-binding algorithm is ECDSA P-256 with
+     * SHA256withECDSA. Ed25519 device keys are NOT accepted (Ed25519 is
+     * reserved exclusively for server-side license/entitlement signing).
      *
      * @return bool|\WP_Error true/false, or a typed error for unusable keys.
      */
@@ -113,23 +115,10 @@ class Class_License_Validator {
             return new \WP_Error('eligius_bad_public_key', 'Stored public key is not valid PEM.', ['status' => 500]);
         }
 
-        // Ed25519 SubjectPublicKeyInfo DER: 302a300506032b6570032100 + 32 raw bytes.
+        // Algorithm gate (CD-10): Ed25519 keys rejected explicitly — fail-closed.
         $ed25519_prefix = hex2bin('302a300506032b6570032100');
         if (is_string($ed25519_prefix) && 0 === strncmp($der, $ed25519_prefix, strlen($ed25519_prefix))) {
-            $raw_public = substr($der, strlen($ed25519_prefix));
-            if (32 !== strlen($raw_public)) {
-                return new \WP_Error('eligius_bad_public_key', 'Ed25519 key has unexpected length.', ['status' => 500]);
-            }
-            if (64 !== strlen($signature_raw)) {
-                return false; // Ed25519 signatures are always 64 bytes.
-            }
-            try {
-                // sodium_crypto_sign_verify_detached THROWS SodiumException on
-                // failure (it does not return false) — catch and translate.
-                return sodium_crypto_sign_verify_detached($signature_raw, (string) $data, $raw_public);
-            } catch (\SodiumException $e) {
-                return false;
-            }
+            return new \WP_Error('eligius_algorithm_not_allowed', 'Device key algorithm is not permitted (CD-10: ECDSA P-256 only).', ['status' => 422]);
         }
 
         // ECDSA P-256 via OpenSSL (SHA-256 digest).

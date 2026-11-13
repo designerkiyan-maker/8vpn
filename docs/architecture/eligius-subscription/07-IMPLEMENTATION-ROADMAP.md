@@ -239,8 +239,8 @@ Android                          Server
 ### Acceptance Criteria
 - [ ] Device registration stores `device_hash`, `public_key`, `label`
 - [ ] One active device per user (enforced at registration + license binding)
-- [ ] Challenge-response uses Android Keystore (non-exportable key)
-- [ ] Server verifies Ed25519/ECDSA P-256 signature
+- [ ] Challenge-response uses Android Keystore (non-exportable key) — ECDSA P-256 per CD-10
+- [ ] Server verifies **ECDSA P-256 (SHA256withECDSA)** challenge signatures; Ed25519 remains the server license-signing algorithm (CD-10)
 - [ ] Challenge expires in 60 seconds
 - [ ] Device transfer: OTP-verified, rate-limited (3/day)
 - [ ] Device transfer swaps `device_id` on license, deactivates old device
@@ -252,8 +252,8 @@ Android                          Server
 - Security: Replay attack, signature forgery, key extraction attempts
 
 ### Risks
-- Android Keystore availability (API 23+ for EC, API 28+ for Ed25519) — fallback to ECDSA P-256
-- Emulator testing (no hardware keystore) — software fallback works
+- Android Keystore availability — ECDSA P-256 is the confirmed baseline (CD-10): API 23+ for EC covers minSdk 26; software Keystore works on emulators (no hardware TEE required)
+- Emulator testing (no hardware keystore) — software fallback works; Keystore non-exportability on hardware-backed devices is a device property, not a server guarantee
 
 ---
 
@@ -860,7 +860,7 @@ P0 ──► P1 ──► P2 ──► P3 ──► P6
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | Gateway API changes | Medium | High | Adapter pattern, versioned API, monitoring |
-| Android Keystore unavailable | Low | High | Fallback to ECDSA P-256, software keystore |
+| Android Keystore unavailable | Low | High | ECDSA P-256 baseline per CD-10 (API 23+ covers minSdk 26); software keystore on emulators |
 | Payment gateway downtime | Low | High | Multiple gateway support, graceful degradation |
 | Key rotation failure | Low | Critical | Pre-generated keys, automated APK release |
 | Trial abuse (factory reset / multi-account) | Medium | Medium | Account-keyed trial (CD-6) + OTP-verified mobile + layered rate limits + anomaly flagging; **complete prevention not claimed** — documented residual risk |

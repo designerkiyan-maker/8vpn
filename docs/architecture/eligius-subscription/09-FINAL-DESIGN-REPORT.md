@@ -49,12 +49,19 @@ The following decisions have been **explicitly approved by the owner** and are a
 - **NO mandatory national code** and no other unjustified identity data collection (owner decision, this finalization pass). If identity verification is ever added, it is a separate decision (TD-10)
 - Multi-account creation as a trial-abuse vector is acknowledged as a **separate, incompletely preventable risk** (TD-1); no claim of complete prevention is made — see Residual Risks below
 
-### CD-7. Device Binding — Requirement CONFIRMED, Mechanism PROPOSED
+### CD-7. Device Binding — Requirement CONFIRMED, Mechanism CONFIRMED (CD-10)
 - **CONFIRMED requirement:** one active device per user account; server-verified device binding; challenge-response authentication
-- **PROPOSED mechanism (NOT yet owner-confirmed — see TD-8):** Android Keystore **ECDSA P-256** keypair, non-exportable, hardware-backed where available; `device_hash = SHA-256(pubkey_der || ANDROID_ID)`; SHA256withECDSA challenge signatures
-- Why P-256 fits: portable across the app's minSdk (API 23+), non-exportable keys, no extra permissions, standard PHP `openssl_verify()` on the server — full evaluation in 04 §2.4
+- **CONFIRMED mechanism (owner confirmed 2026-11-13 — TD-8 resolved, see CD-10):** Android Keystore **ECDSA P-256** keypair, non-exportable, hardware-backed where available; `device_hash = SHA-256(pubkey_der || ANDROID_ID)`; SHA256withECDSA challenge signatures
+- Why P-256 fits: portable across the app's minSdk (API 23+), non-exportable keys, no extra permissions, standard PHP `openssl_verify()` on the server — full decision in 04 §2.4
 - **Honest limitation (unchanged):** Android Keystore keys are destroyed on app uninstall (Android 6.0+) — after reinstall, a NEW keypair → NEW `device_hash`. Device binding therefore does not survive reinstall and is **not** a trial-reset control (trial is account-keyed per CD-6)
-- No guarantee of permanent hardware identification is made; alternatives (Ed25519, RSA, HMAC, Play Integrity) evaluated and documented in 04 §2.4 — none offer a decisive advantage over the proposal
+- **Hardware attestation is NOT required** — Keystore generation must not be claimed as proof of hardware-backed key storage
+- No guarantee of permanent hardware identification is made; alternatives (Ed25519, RSA, HMAC, Play Integrity) evaluated and documented in 04 §2.4
+
+### CD-10. Device-Binding Signature Mechanism (TD-8 resolved — owner confirmed 2026-11-13)
+- **Decision:** device identity uses **Android Keystore ECDSA P-256 (secp256r1)** — private key generated and stored inside the Keystore, **non-exportable**; the public key is registered with the backend; ownership is proven by signing a server-issued challenge with `SHA256withECDSA`; the server verifies the signature against the stored public key (`openssl_verify`, SHA-256, DER ECDSA)
+- **Server license signing remains Ed25519** (sodium) for licenses/offline entitlements — the two algorithms have **independent responsibilities and are NOT interchangeable**
+- **Hardware attestation is NOT required** and Keystore generation must not be presented as proof of hardware-backed storage (TEE/StrongBox varies; software Keystore acceptable)
+- Alternative evaluation (Ed25519-on-Keystore, RSA, HMAC, Play Integrity) retained in 04 §2.4
 
 ### CD-8. Implementation Status
 - Phase 0 has **NOT been executed**
@@ -85,11 +92,11 @@ These are the only genuinely open items that need a decision or further technica
 | **TD-5** | **Trial device-transfer policy detail** | Transfer also re-binds trial device_id (current design) vs trial stays account-only and any new device works | Current design (OTP-verified transfer re-binds) is recommended — keeps device binding meaningful | No — current design confirmed unless owner objects |
 | **TD-6** | **ZarinPal merchant account prerequisites** | Sandbox-first vs production-first | Sandbox-first with the test merchant; production merchant ID supplied by owner via Gateway Settings page | Yes — owner must create the ZarinPal merchant account before P4 |
 | **TD-7** | **Existing usermeta data migration** | Migrate `eligius_total_*` usage counters into new tables vs leave in usermeta | Leave in usermeta (usage endpoints unchanged, no migration risk); new tables only for subscription data | No — default is "leave", confirm if owner prefers otherwise |
-| **TD-8** | **Device-binding signature mechanism** (added this pass) | (a) Android Keystore ECDSA P-256 (proposal in 04 §2.4); (b) Ed25519 runtime-upgrade path where Keystore supports it; (c) HMAC shared secret (rejected — extractable); (d) Play Integrity (rejected as primitive — connectivity/market constraints) | (a) as the portable baseline, with (b) as an optional runtime upgrade on capable devices. Full evaluation in 04 §2.4 | **Yes — confirm before P2** (device binding phase) |
+| **TD-8** | **Device-binding signature mechanism** — **RESOLVED** | ~~(a) Android Keystore ECDSA P-256 (proposal in 04 §2.4); (b) Ed25519 runtime-upgrade path where Keystore supports it; (c) HMAC shared secret (rejected — extractable); (d) Play Integrity (rejected as primitive — connectivity/market constraints)~~ | ✅ **Confirmed by owner on 2026-11-13: option (a) as the baseline, Ed25519 server-side unchanged** — recorded as CD-10 (04 §2.4 updated) | ~~Yes — confirm before P2~~ **Resolved** |
 | **TD-9** | **Offline time-integrity strategy** (final — Pass 5: BOOT_COUNT strict policy, gap eliminated) | Layered approach: elapsedRealtime monotonic anchor + **`Settings.Global.BOOT_COUNT` strict policy** (any mismatch → offline DENIED, online is the only path) + wall-rollback check (anchor − 60s tolerance) + AUTO_TIME signal + server-side retroactive anomaly flagging (04 §4.4, 06 §3.6). `bootCount()` returns `Int?` — read failure distinguishable from any real value. **The partial-rollback-across-reboot gap is ELIMINATED** — any BOOT_COUNT change → offline denied immediately. No false guarantees: rooted devices remain the residual risk | Adopt as designed; the strict BOOT_COUNT policy eliminates all documented clock-manipulation gaps except rooting | No — confirmed by owner |
 | **TD-10** | **Remove mandatory national_code from registration** (added this pass) | The live endpoint `eligius-otp.php /register/otp-start` currently REQUIRES `national_code` (mod-11 validated). Per the owner's no-unnecessary-identity-data decision, this field becomes optional or removed | Remove from required fields during implementation (code change to the live endpoint — out of scope until implementation is authorized). If the owner later wants identity verification, revisit as a new decision | No — documented for the implementation phase |
 
-> **Note:** TD-2, TD-4, TD-6 must be resolved before their respective phases (P4, P1, P4). TD-1, TD-3, TD-5, TD-7 have safe defaults and can proceed with the recommendation unless overridden.
+> **Note:** TD-2 and TD-6 must be resolved before P4. TD-1, TD-3, TD-5, TD-7 have safe defaults and can proceed with the recommendation unless overridden. TD-8 was resolved on 2026-11-13 (see CD-10); TD-4 was verified resolved during Phase 1 (sodium present on host).
 
 ---
 
@@ -212,14 +219,14 @@ Legend: ✓ = addressed consistently; — = not applicable to that document; all
 |-------|-------------|----------------|
 | P0 (setup) | ✅ Ready | None |
 | P1 (Licensing core) | ✅ Ready | TD-4 (sodium on host — verify; fallback exists) |
-| P2 (Device binding) | ✅ Ready | TD-8 (owner confirms ECDSA P-256 mechanism — proposal fully evaluated in 04 §2.4) |
+| P2 (Device binding) | ✅ Ready | ✅ TD-8 resolved (owner confirmed ECDSA P-256 — CD-10) |
 | P3 (App enforcement) | ✅ Ready | None (depends on P1+P2) |
 | P4 (Payments) | ⚠️ Ready with 1 open item | TD-2 (IRT/IRR pinning), TD-6 (owner creates ZarinPal merchant) |
 | P5 (Trials & transfers) | ✅ Ready | None (TD-1 layered policy applies) |
 | P6 (Hardening & tests) | ✅ Ready | None (time-integrity tests included) |
 | P7 (OTP login, optional) | ✅ Ready | None |
 
-**All 8 documents are implementation-ready.** The only pre-implementation verifications are: (1) confirm the `sodium` PHP extension on the host (TD-4), (2) pin the currency unit (TD-2), (3) owner creates the ZarinPal merchant account (TD-6), (4) owner confirms the device-binding signature mechanism (TD-8).
+**All 8 documents are implementation-ready.** Remaining pre-implementation verifications: (1) pin the currency unit (TD-2), (2) owner creates the ZarinPal merchant account (TD-6). TD-4 (sodium) and TD-8 (device-binding ECDSA P-256) are resolved — see Phase 1 execution and CD-10.
 
 ---
 
