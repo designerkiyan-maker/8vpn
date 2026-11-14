@@ -17,12 +17,15 @@ class Class_License_Repository extends Class_Repository_Base {
     public static function get_current($user_id) {
         global $wpdb;
         $table = self::table();
+        // Trial-first consumption (doc 05 §3.1): when a TRIAL and a purchased
+        // license coexist (paid starts at trial expiry), serve the TRIAL until
+        // it expires so the paid license is never usable early.
         return $wpdb->get_row($wpdb->prepare(
             "SELECT * FROM `{$table}`
               WHERE user_id = %d
                 AND status IN ('ACTIVE','TRIAL')
                 AND expires_at > %s
-              ORDER BY expires_at DESC, id DESC
+              ORDER BY (status = 'TRIAL') DESC, expires_at DESC, id DESC
               LIMIT 1",
             (int) $user_id,
             Class_UTC_Time::mysql_utc()
@@ -38,7 +41,7 @@ class Class_License_Repository extends Class_Repository_Base {
               WHERE user_id = %d AND device_id = %d
                 AND status IN ('ACTIVE','TRIAL')
                 AND expires_at > %s
-              ORDER BY expires_at DESC, id DESC
+              ORDER BY (status = 'TRIAL') DESC, expires_at DESC, id DESC
               LIMIT 1",
             (int) $user_id,
             (int) $device_id,

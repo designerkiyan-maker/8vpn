@@ -75,6 +75,13 @@ class Class_License_Controller extends Class_Api_Controller {
             'permission_callback' => [self::class, 'permission_user_global'],
         ]);
 
+        // GET /plans (docs 03 §4.1 — public catalog; used by the P3/P4 UI).
+        register_rest_route(self::NAMESPACE_V1, '/plans', [
+            'methods'             => 'GET',
+            'callback'            => [$this, 'route_plans'],
+            'permission_callback' => '__return_true',
+        ]);
+
         // POST /licenses/renew (Roadmap P1 route list; payment flow is P4).
         register_rest_route(self::NAMESPACE_V1, '/licenses/renew', [
             'methods'             => 'POST',
@@ -222,6 +229,24 @@ class Class_License_Controller extends Class_Api_Controller {
         ]);
 
         return self::ok($result, 201);
+    }
+
+    /** GET /plans — public catalog (docs 03 §4.1). */
+    public function route_plans() {
+        $manager = \Eligius_Sub\License\Class_License_Manager::instance();
+        $rows = $manager->list_plans();
+        $plans = [];
+        foreach ($rows as $r) {
+            $plans[] = [
+                'key'              => (string) $r->plan_key,
+                'label'            => (string) $r->label,
+                'duration_days'    => (int) $r->duration_days,
+                'price_irt'        => (int) $r->price_irt,
+                'discount_percent' => (int) $r->discount_percent,
+                'is_trial'         => (bool) $r->is_trial,
+            ];
+        }
+        return self::ok(['plans' => $plans]);
     }
 
     public function route_renew(\WP_REST_Request $request) {

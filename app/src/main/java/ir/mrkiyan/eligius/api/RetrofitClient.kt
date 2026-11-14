@@ -79,6 +79,7 @@ object RetrofitClient {
 
     val licenseApi: LicenseApiService by lazy { retrofit.create(LicenseApiService::class.java) }
     val deviceApi: DeviceApiService by lazy { retrofit.create(DeviceApiService::class.java) }
+    val paymentApi: ir.mrkiyan.eligius.api.PaymentApiService by lazy { retrofit.create(ir.mrkiyan.eligius.api.PaymentApiService::class.java) }
 
     /** Extract the human-readable error from a failed envelope. */
     fun errorMessage(response: retrofit2.Response<out ApiResponse<*>>): String? {

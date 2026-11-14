@@ -54,7 +54,9 @@ class DeviceIdentityTest {
             val code = con.responseCode
             val text = (if (code in 200..299) con.inputStream else con.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
-            return Pair(code, JSONObject(text))
+            // 302 deep-link responses have empty bodies — tolerate non-JSON.
+            val json = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
+            return Pair(code, json)
         } finally {
             con.disconnect()
         }

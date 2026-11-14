@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +53,9 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
     var plans by remember { mutableStateOf<List<ir.mrkiyan.eligius.api.model.PlanData>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var buying by remember { mutableStateOf(false) }
+    var buyError by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -112,8 +116,42 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                                     "${plan.priceIrt / 10} تومان (-${plan.discountPercent}٪)"
                                 else "${plan.priceIrt / 10} تومان"
                                 Text(priceText, fontWeight = FontWeight.Bold)
-                                Button(onClick = { /* Phase 4 — payment gateway */ }, enabled = false) {
-                                    Text("خرید")
+                                Button(
+                                    enabled = plan.priceIrt > 0 && !buying,
+                                    onClick = {
+                                        buying = true
+                                        scope.launch {
+                                            runCatching {
+                                                val response = RetrofitClient.paymentApi.createPayment(
+                                                    mapOf(
+                                                        "plan_key" to plan.planKey,
+                                                        "gateway" to "zarinpal"
+                                                    )
+                                                )
+                                                if (response.isSuccessful) {
+                                                    val data = response.body()?.data
+                                                    val redirect = data?.redirectUrl ?: ""
+                                                    if (redirect.isNotBlank()) {
+                                                        buyError = null
+                                                        // Open the gateway payment page in the browser.
+                                                        ctx.startActivity(
+                                                            android.content.Intent(
+                                                                android.content.Intent.ACTION_VIEW,
+                                                                android.net.Uri.parse(redirect)
+                                                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                        )
+                                                    } else {
+                                                        buyError = "درگاه پرداخت پاسخ معتبر نداد."
+                                                    }
+                                                } else {
+                                                    buyError = RetrofitClient.errorMessage(response) ?: "خطا در ایجاد پرداخت"
+                                                }
+                                            }.onFailure { buyError = "خطای شبکه: ${it.message}" }
+                                            buying = false
+                                        }
+                                    }
+                                ) {
+                                    Text(if (buying) "..." else "خرید")
                                 }
                             }
                             if (plan.discountPercent > 0) {
@@ -126,9 +164,14 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+                buyError?.let {
+                    item {
+                        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
+                    }
+                }
                 item {
                     Text(
-                        "پرداخت آنلاین در به‌روزرسانی بعدی فعال می‌شود.",
+                        "پس از پرداخت، درگاه به‌صورت خودکار به برنامه بازمی‌گردد و وضعیت واقعی از سرور استعلام می‌شود.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 8.dp)

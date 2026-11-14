@@ -109,8 +109,12 @@ class Eligius_Subscription {
         \Eligius_Sub\Api\Class_License_Controller::instance();
         \Eligius_Sub\Api\Class_Device_Controller::instance();
 
-        // Admin pages (hook admin_menu via Class_Admin_Menu).
+        // Admin pages (hook admin_menu via Class_Admin_Menu) + gateway settings.
         \Eligius_Sub\Admin\Class_Admin_Menu::instance();
+        \Eligius_Sub\Admin\Class_Gateway_Settings::instance();
+
+        // Phase 4 payment REST endpoints (hook rest_api_init).
+        \Eligius_Sub\Api\Class_Payment_Controller::instance();
     }
 
     /**

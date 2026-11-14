@@ -104,3 +104,29 @@ data class PlanData(
 data class PlanListData(
     val plans: List<PlanData> = emptyList()
 )
+
+
+data class PaymentCreateData(
+    @Json(name = "payment_id") val paymentId: Long = 0,
+    val gateway: String = "",
+    val authority: String = "",
+    @Json(name = "redirect_url") val redirectUrl: String = "",
+    @Json(name = "amount_irt") val amountIrt: Long = 0,
+    @Json(name = "expires_in") val expiresIn: Int = 1800
+)
+
+data class PaymentStatusData(
+    @Json(name = "payment_id") val paymentId: Long = 0,
+    val gateway: String = "",
+    @Json(name = "amount_irt") val amountIrt: Long = 0,
+    @Json(name = "plan_key") val planKey: String = "",
+    val status: String = "",
+    @Json(name = "initiated_at") val initiatedAt: String? = null,
+    @Json(name = "verified_at") val verifiedAt: String? = null,
+    @Json(name = "license_id") val licenseId: Long? = null
+)
+
+data class PaymentHistoryData(
+    val payments: List<PaymentStatusData> = emptyList(),
+    val page: Int = 1
+)

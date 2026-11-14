@@ -120,8 +120,30 @@ class Class_License_Manager {
         return Class_License_Repository::get_current($user_id);
     }
 
-    /** Payment-driven activation (doc 05 §4.1) — payment processing is P4. */
+    /** Payment-driven activation (doc 05 §4.1) — standalone transaction. */
     public function activate_license($user_id, $plan_key, $payment_id = null, $device_id = null) {
+        global $wpdb;
+
+        $wpdb->query('START TRANSACTION');
+        $result = $this->activate_license_within_transaction($user_id, $plan_key, $payment_id, $device_id);
+        if (is_wp_error($result)) {
+            $wpdb->query('ROLLBACK');
+            return $result;
+        }
+        $wpdb->query('COMMIT');
+        return $result;
+    }
+
+    /**
+     * Activation core WITHOUT its own transaction — used by the payment
+     * callback so license activation joins the callback's single transaction
+     * (all-or-nothing: a failed activation rolls the whole callback back,
+     * docs 05 §3.1 + Phase-4 requirement 9). Assumes the caller has opened a
+     * transaction and holds the user-row lock (CD-9 single lock point).
+     *
+     * @return int|\WP_Error License id or typed error (caller ROLLBACKs).
+     */
+    public function activate_license_within_transaction($user_id, $plan_key, $payment_id = null, $device_id = null) {
         global $wpdb;
 
         $plan = $this->get_plan($plan_key);
@@ -130,23 +152,69 @@ class Class_License_Manager {
         }
 
         // Shared lock point (doc 02 §2.8.3) serializes license creation.
-        $wpdb->query('START TRANSACTION');
         $locked = $wpdb->get_row($wpdb->prepare(
             "SELECT ID FROM {$wpdb->users} WHERE ID = %d FOR UPDATE",
             (int) $user_id
         ));
         if (null === $locked || '' !== $wpdb->last_error) {
-            $wpdb->query('ROLLBACK');
             return new \WP_Error('eligius_db_lock_failed', 'Could not lock the account row.', ['status' => 500]);
         }
 
         $existing = Class_License_Repository::get_latest($user_id);
 
-        // Renewal semantics (doc 05 §4.1): extend from expiry when active.
+        // TRIAL → PAID conversion (doc 05 §3.1: "Payment during trial →
+        // upgrades to paid, extend from trial expiry"): the paid license
+        // starts when the trial would have ended; the trial row stays TRIAL
+        // and is expired later by the daily cron.
         $started_at = Class_UTC_Time::mysql_utc();
-        if ($existing && 'ACTIVE' === $existing->status && $existing->expires_at > Class_UTC_Time::mysql_utc()) {
+        if ($existing
+            && 'TRIAL' === $existing->status
+            && !$plan->is_trial
+            && $existing->expires_at > Class_UTC_Time::mysql_utc()
+        ) {
             $started_at = (string) $existing->expires_at;
         }
+
+        // RENEWAL (doc 05 §4.1): same-plan payment while that plan is ACTIVE
+        // must EXTEND the existing row — inserting a second ACTIVE row would
+        // violate uniq_user_active_plan and make the callback retry loop
+        // permanently fail (Phase-4 requirement 9). Renewal extends
+        // expires_at from the current expiry and reuses the row id.
+        if ($existing
+            && 'ACTIVE' === $existing->status
+            && $existing->plan_key === (string) $plan->plan_key
+            && $existing->expires_at > Class_UTC_Time::mysql_utc()
+        ) {
+            $new_expires = gmdate('Y-m-d H:i:s', strtotime("+{$plan->duration_days} days", strtotime($existing->expires_at)));
+            $extended = $wpdb->query($wpdb->prepare(
+                "UPDATE {$wpdb->prefix}eligius_licenses
+                  SET expires_at = %s, updated_at = CURRENT_TIMESTAMP
+                  WHERE id = %d",
+                $new_expires,
+                (int) $existing->id
+            ));
+            if (false === $extended || '' !== $wpdb->last_error) {
+                return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'License renewal failed.', ['status' => 500]);
+            }
+
+            $event = Class_Audit_Log_Repository::insert_license_event([
+                'license_id' => (int) $existing->id,
+                'user_id'    => (int) $user_id,
+                'device_id'  => $device_id,
+                'event_type' => 'license.renewed',
+                'details'    => [
+                    'plan_key'      => $plan_key,
+                    'extends_to'    => $new_expires,
+                    'payment_id'    => $payment_id ? (int) $payment_id : null,
+                ],
+            ]);
+            if (0 === $event) {
+                return new \WP_Error('eligius_db_audit_failed', 'License renewal event insert failed.', ['status' => 500]);
+            }
+
+            return (int) $existing->id;
+        }
+
         $expires_at = gmdate('Y-m-d H:i:s', strtotime("+{$plan->duration_days} days", strtotime($started_at)));
 
         $data = [
@@ -165,7 +233,6 @@ class Class_License_Manager {
 
         $license_id = Class_License_Repository::create($data);
         if (0 === $license_id || '' !== $wpdb->last_error) {
-            $wpdb->query('ROLLBACK');
             return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'License insert failed.', ['status' => 500]);
         }
 
@@ -181,11 +248,9 @@ class Class_License_Manager {
             'details'    => ['plan_key' => $plan_key, 'source' => $data['source']],
         ]);
         if (0 === $event) {
-            $wpdb->query('ROLLBACK');
             return new \WP_Error('eligius_db_audit_failed', 'License event insert failed.', ['status' => 500]);
         }
 
-        $wpdb->query('COMMIT');
         return (int) $license_id;
     }
 

@@ -49,7 +49,9 @@ class LicenseStoreTest {
             val code = con.responseCode
             val text = (if (code in 200..299) con.inputStream else con.errorStream)
                 ?.bufferedReader()?.use { it.readText() } ?: ""
-            return Pair(code, JSONObject(text))
+            // 302 deep-link responses have empty bodies — tolerate non-JSON.
+            val json = runCatching { JSONObject(text) }.getOrElse { JSONObject() }
+            return Pair(code, json)
         } finally {
             con.disconnect()
         }
@@ -222,6 +224,8 @@ class LicenseStoreTest {
 
         // Force the gate past the online cache so the OFFLINE path is exercised.
         LicenseStore.invalidateCache()
+        LicenseStore.licenseState.value = null
+        println("P3DIAG t5: lastCheckedAt=0 forced, blob=${OfflineEntitlementStore(ctx).get()?.blob?.take(24)}, expiresAt=${OfflineEntitlementStore(ctx).get()?.expiresAt}")
 
         // The gate must pass OFFLINE: cached state is empty (fresh init) but the
         // entitlement validates and TimeIntegrity allows the budget.
