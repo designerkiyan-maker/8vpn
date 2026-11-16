@@ -28,6 +28,10 @@ data class LicenseStatusData(
     @Json(name = "expires_at") val expiresAt: String? = null,
     @Json(name = "device_id") val deviceId: Long? = null,
     @Json(name = "device_bound") val deviceBound: Boolean? = null,
+    /** Phase 5b: REAL backend trial eligibility (server gate = has_trial_ever). */
+    @Json(name = "trial_eligible") val trialEligible: Boolean = false,
+    /** Phase 5b: active device id when the caller device is pending transfer. */
+    @Json(name = "active_device_id") val activeDeviceId: Long? = null,
     @Json(name = "offline_entitlement") val offlineEntitlement: OfflineEntitlementData? = null
 )
 
@@ -67,7 +71,15 @@ data class DeviceInfo(
 
 data class DeviceListData(
     val devices: List<DeviceInfo> = emptyList(),
-    @Json(name = "active_device_id") val activeDeviceId: Long? = null
+    @Json(name = "active_device_id") val activeDeviceId: Long? = null,
+    /** Phase 5b: present when THIS device is the destination of a pending OTP transfer. */
+    @Json(name = "pending_transfer") val pendingTransfer: PendingTransferData? = null
+)
+
+data class PendingTransferData(
+    @Json(name = "transfer_id") val transferId: Long = 0,
+    @Json(name = "expires_at") val expiresAt: String? = null,
+    @Json(name = "expires_in") val expiresIn: Int = 0
 )
 
 data class ChallengeData(

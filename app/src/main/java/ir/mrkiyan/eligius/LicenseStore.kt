@@ -46,6 +46,13 @@ object LicenseStore {
         val error: String? = null,
         /** Extra payload for UI flows (e.g. active device id on limit reached). */
         val activeDeviceId: Long? = null,
+        /**
+         * Phase 5b: REAL backend trial eligibility (server gate = has_trial_ever).
+         * Only true when the server reported NO_ACTIVE_LICENSE on an ACTIVE
+         * device for an account that has never used its trial — the trial
+         * banner must never be driven by local cache emptiness alone.
+         */
+        val trialEligible: Boolean = false,
         val licenseState: LicenseState? = null
     )
 
@@ -212,9 +219,16 @@ object LicenseStore {
             }
 
             // Server answered with a non-valid license state.
+            // Phase 5b: carry the REAL backend trial eligibility and the
+            // active-device id (pending-transfer path) into the gate result.
             val errCode = data.error ?: "NO_ACTIVE_LICENSE"
             licenseState.value = state.copy(valid = false)
-            return ValidationResult(false, errCode)
+            return ValidationResult(
+                false,
+                errCode,
+                activeDeviceId = data.activeDeviceId,
+                trialEligible = data.trialEligible
+            )
         } catch (e: Exception) {
             // Network error — the offline entitlement was already tried above
             // (step 4); if we reached here, no valid offline path exists.

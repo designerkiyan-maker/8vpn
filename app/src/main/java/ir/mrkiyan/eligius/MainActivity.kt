@@ -83,6 +83,13 @@ private fun Root(onLanguageChanged: () -> Unit) {
     var licenseDialogError by rememberSaveable { mutableStateOf<String?>(null) }
     var licenseDialogActiveDevice by rememberSaveable { mutableStateOf<Long?>(null) }
 
+    // Phase 5b trial banner: shown ONLY when the backend gate itself reported
+    // NO_ACTIVE_LICENSE with trial_eligible=true (server gate = has_trial_ever)
+    // — never from local cache emptiness, never for accounts whose
+    // subscription lives on another device (those get DEVICE_LIMIT_REACHED →
+    // transfer flow instead).
+    var trialBannerVisible by rememberSaveable { mutableStateOf(false) }
+
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -124,11 +131,13 @@ private fun Root(onLanguageChanged: () -> Unit) {
                     val i = if (s.vpnMode) VpnService.prepare(ctx) else null
                     if (i != null) vpnLauncher.launch(i) else TunnelService.start(ctx)
                     screen = HOME
+                    trialBannerVisible = false
                 } else {
                     licenseDialogError = gate.error
                     licenseDialogActiveDevice = gate.activeDeviceId
                     licenseDialogVisible = true
                     screen = HOME
+                    trialBannerVisible = (gate.error == "NO_ACTIVE_LICENSE" && gate.trialEligible)
                 }
             }
         } else if (st.phase != Phase.STOPPING) {
@@ -138,6 +147,17 @@ private fun Root(onLanguageChanged: () -> Unit) {
 
     val glow = LocalExtra.current.a
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Phase 5b trial grant banner — driven by the server-reported
+        // eligibility only; on success the license is re-fetched from the
+        // backend (ensureValid) and the banner disappears.
+        if (screen == HOME && trialBannerVisible) {
+            TrialGrantBanner(onTrialGranted = {
+                scope.launch {
+                    val g = LicenseStore.ensureValid()
+                    trialBannerVisible = !g.isValid
+                }
+            })
+        }
         Box(Modifier.weight(1f)) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 Box(

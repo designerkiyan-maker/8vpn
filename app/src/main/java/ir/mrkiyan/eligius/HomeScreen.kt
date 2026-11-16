@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -529,5 +531,92 @@ fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onTertiaryContainer
         )
+    }
+}
+
+/**
+ * Phase 5: Trial grant banner — shown when the user has NO valid license
+ * (NO_ACTIVE_LICENSE) and the account hasn't used its trial yet. Tapping
+ * triggers POST /licenses/trial via AuthStore.grantTrial().
+ *
+ * Phase 5b: visibility is SERVER-driven — MainActivity shows this banner
+ * only when the gate reports NO_ACTIVE_LICENSE with trial_eligible=true
+ * (backend gate = has_trial_ever). Never rendered from local cache state.
+ */
+@Composable
+fun TrialGrantBanner(onTrialGranted: () -> Unit) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var granting by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var granted by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var grantError by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+
+    if (granted) return
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .background(
+                MaterialTheme.colorScheme.primaryContainer,
+                RoundedCornerShape(12.dp)
+            )
+            .padding(16.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "دوره رایگان ۳۰ روزه",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "۳۰ روز رایگان با تمام امکانات — فقط یک مرتبه برای هر حساب",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Spacer(Modifier.height(8.dp))
+            if (granting) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp))
+            } else {
+                androidx.compose.material3.Button(
+                    onClick = {
+                        granting = true
+                        scope.launch {
+                            val result = AuthStore.grantTrial()
+                            result.fold(
+                                onSuccess = {
+                                    granted = true
+                                    LicenseStore.invalidateCache()
+                                    onTrialGranted()
+                                },
+                                onFailure = { grantError = it.message ?: "خطا در دریافت دوره رایگان" }
+                            )
+                            granting = false
+                        }
+                    }
+                ) { Text("شروع دوره رایگان") }
+            }
+            grantError?.let { err ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("trial_banner_error")
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Phase 5b preview (owner requirement: changed Compose files carry previews).
+ */
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "TrialGrantBanner")
+@Composable
+private fun TrialGrantBannerPreview() {
+    MaterialTheme {
+        TrialGrantBanner(onTrialGranted = {})
     }
 }

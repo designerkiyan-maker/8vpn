@@ -37,6 +37,22 @@ class Class_License_Manager {
         // 1. Verify device belongs to the user and is active (already resolved).
         $device_id = (int) $device->id;
 
+        // Phase 5b (owner decision): a PENDING device (registered, inactive)
+        // NEVER serves a license and NEVER enters the trial path — it is
+        // directed to the OTP transfer flow. trial_eligible is explicitly
+        // false: an account whose subscription lives on another device must
+        // not be offered a trial (route_trial also requires an ACTIVE device,
+        // so this cannot be bypassed with a direct call).
+        if (!(int) $device->is_active) {
+            $active_id = (int) Class_Device_Repository::find_active_id($user_id);
+            return [
+                'valid'            => false,
+                'error'            => $active_id > 0 ? 'DEVICE_LIMIT_REACHED' : 'DEVICE_NOT_BOUND',
+                'active_device_id' => $active_id,
+                'trial_eligible'   => false,
+            ];
+        }
+
         // 2. License bound to this device.
         $license = Class_License_Repository::get_current_for_device($user_id, $device_id);
 
@@ -49,9 +65,13 @@ class Class_License_Manager {
                 return $this->build_response($trial, $device_id);
             }
 
+            // Phase 5b: surface REAL trial eligibility (server-side gate =
+            // has_trial_ever, doc 05 §3.1/CD-6) so the client only shows the
+            // trial banner when the backend says the account qualifies.
             return [
-                'valid' => false,
-                'error' => 'NO_ACTIVE_LICENSE',
+                'valid'          => false,
+                'error'          => 'NO_ACTIVE_LICENSE',
+                'trial_eligible' => !Class_License_Repository::has_trial_ever($user_id),
             ];
         }
 

@@ -61,6 +61,7 @@ class Class_Auth_Integration {
      * Resolve the device row for the request's X-Device-Hash header.
      * The device must exist, belong to the current user and be ACTIVE —
      * device-bound endpoints only accept the active device (doc 04 §5.1).
+     * Phase 5: BLOCKED devices are rejected (backend-enforced).
      *
      * @return \WP_Error|\stdClass The device row or a typed error.
      */
@@ -86,6 +87,61 @@ class Class_Auth_Integration {
             return new \WP_Error(
                 'eligius_device_not_bound',
                 'Device is not registered or not active for this account.',
+                ['status' => 403]
+            );
+        }
+
+        // Phase 5: backend-enforced blocked check.
+        if (!empty($device->blocked)) {
+            return new \WP_Error(
+                'eligius_device_blocked',
+                'This device has been blocked by an administrator.',
+                ['status' => 403]
+            );
+        }
+
+        $this->resolved_device = $device;
+        return $device;
+    }
+
+    /**
+     * Resolve a REGISTERED device (active or inactive) — used by the
+     * transfer-from-new-device flow where the calling device may not be
+     * active yet. Blocked devices are still rejected (backend-enforced).
+     *
+     * @return \WP_Error|\stdClass The device row or a typed error.
+     */
+    public function resolve_registered_device(\WP_REST_Request $request) {
+        $user_check = $this->permission_user($request);
+        if (is_wp_error($user_check)) {
+            return $user_check;
+        }
+
+        $device_hash = $this->get_device_hash($request);
+        if (null === $device_hash) {
+            return new \WP_Error(
+                'eligius_device_hash_missing',
+                'A valid 64-hex X-Device-Hash header is required.',
+                ['status' => 400]
+            );
+        }
+
+        $user_id = get_current_user_id();
+        $device  = Class_Device_Repository::find_by_hash($user_id, $device_hash);
+
+        if (!$device) {
+            return new \WP_Error(
+                'eligius_device_not_found',
+                'Device is not registered for this account.',
+                ['status' => 403]
+            );
+        }
+
+        // Phase 5: backend-enforced blocked check.
+        if (!empty($device->blocked)) {
+            return new \WP_Error(
+                'eligius_device_blocked',
+                'This device has been blocked by an administrator.',
                 ['status' => 403]
             );
         }

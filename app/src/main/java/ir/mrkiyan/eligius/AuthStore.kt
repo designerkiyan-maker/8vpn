@@ -548,43 +548,49 @@ object AuthStore {
             val mine = data.devices.firstOrNull { it.deviceHash == deviceHash }
             val activeId = data.activeDeviceId ?: 0L
 
-            when {
-                mine != null && mine.isActive -> {
-                    // 2a. Already bound+active: prove ownership once, done.
-                    val ok = verifyDeviceChallenge().getOrDefault(false)
-                    deviceBinding.value = if (ok) {
-                        if (exp > 0) prefs?.edit()?.putLong("device_verified_exp", exp)?.apply()
-                        DeviceBindingState.Verified
-                    } else {
-                        DeviceBindingState.Failed("challenge verification failed")
-                    }
-                    return
+            if (mine != null && mine.isActive) {
+                // 2a. Already bound+active: prove ownership once, done.
+                val ok = verifyDeviceChallenge().getOrDefault(false)
+                deviceBinding.value = if (ok) {
+                    if (exp > 0) prefs?.edit()?.putLong("device_verified_exp", exp)?.apply()
+                    DeviceBindingState.Verified
+                } else {
+                    DeviceBindingState.Failed("challenge verification failed")
                 }
-                mine == null && activeId > 0L -> {
-                    // 2b. Another device occupies the slot (CD-9) — the OTP
-                    //     transfer flow (P3 UI) is the only way forward.
-                    deviceBinding.value = DeviceBindingState.LimitReached(activeId)
-                    return
+                return
+            }
+
+            // 2b. Phase 5b: a device whose row is INACTIVE (pending transfer)
+            //     or absent proceeds to registration below — the SERVER
+            //     decides the outcome under the CD-9 lock:
+            //       • absent  + slot taken → row created PENDING (inactive);
+            //       • absent  + slot free  → row created ACTIVE (as before);
+            //       • inactive + slot free → row re-activated (admin-release
+            //         recovery); inactive + slot taken → row stays PENDING.
+            //     The device is NEVER activated by the client; activation
+            //     happens exclusively via the OTP transfer verify. When the
+            //     register is refused, the pre-P5 LimitReached guidance is
+            //     preserved as the fallback.
+            val registered = registerDevice("Android")
+            if (registered.isFailure) {
+                deviceBinding.value = if (activeId > 0L) {
+                    DeviceBindingState.LimitReached(activeId)
+                } else {
+                    DeviceBindingState.Failed(
+                        (registered.exceptionOrNull() as? AuthException)?.uiMessage ?: "register failed"
+                    )
                 }
-                // mine == null && no active device → fall through to register
-                // mine != null && !active → stale row; register path surfaces
-                //                          the server's CONFLICT detail
+                return
             }
         }.onFailure {
             deviceBinding.value = DeviceBindingState.Failed("devices list: " + (it.message ?: ""))
             return
         }
 
-        // 2c. Register the device (first time for this account, or no slot taken).
-        val registered = registerDevice("Android")
-        if (registered.isFailure) {
-            deviceBinding.value = DeviceBindingState.Failed(
-                (registered.exceptionOrNull() as? AuthException)?.uiMessage ?: "register failed"
-            )
-            return
-        }
-
         // 3. Prove key ownership; persist the verification for the session.
+        //     For a PENDING device this proves the key WITHOUT activating it —
+        //     the license fetch then reports DEVICE_LIMIT_REACHED and the UI
+        //     directs the user to the OTP transfer flow.
         val verified = verifyDeviceChallenge().getOrDefault(false)
         deviceBinding.value = if (verified) {
             if (exp > 0) prefs?.edit()?.putLong("device_verified_exp", exp)?.apply()
@@ -596,9 +602,11 @@ object AuthStore {
 
     /**
      * Registers the current Keystore device with the backend.
-     * Requires an authenticated JWT session; one-active-device policy is
-     * enforced server-side (DEVICE_LIMIT_REACHED when the account already has
-     * an active device — the app surfaces that state to the user).
+     * Requires an authenticated JWT session; the CD-9 one-active-device
+     * policy is enforced server-side — when the account's slot is taken the
+     * server creates/keeps the row PENDING (inactive, Phase 5b) and the
+     * device is activated exclusively via the OTP transfer verify. An
+     * inactive row with a FREE slot is re-activated (admin-release recovery).
      */
     suspend fun registerDevice(label: String = "Android"): Result<String> =
         withContext(Dispatchers.IO) {
@@ -659,6 +667,106 @@ object AuthStore {
                 throw AuthException(RetrofitClient.errorMessage(verResponse))
             }
             verResponse.body()?.data?.verified ?: false
+        }
+    }
+
+    /**
+     * Phase 5: grant the 30-day trial (POST /licenses/trial) for the current
+     * user. Returns success when the trial is granted or already used.
+     */
+    suspend fun grantTrial(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = flow.value?.token ?: error("no JWT session")
+            val deviceHash = DeviceIdentity.getDeviceHash(appContext ?: error("AuthStore.init not called"))
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/licenses/trial").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("X-Device-Hash", deviceHash)
+                setRequestProperty("Content-Type", "application/json")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                con.outputStream.use { it.write(JSONObject().put("device_hash", deviceHash).toString().toByteArray()) }
+                val code = con.responseCode
+                val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val j = JSONObject(body)
+                if (code in 200..299) {
+                    "trial_granted"
+                } else {
+                    val errMsg = j.optJSONObject("error")?.optString("message") ?: j.optString("message")
+                    throw AuthException(errMsg.takeIf { it.isNotEmpty() })
+                }
+            } finally {
+                con.disconnect()
+            }
+        }
+    }
+
+    /**
+     * Phase 5: initiate transfer from the NEW device (currently inactive) —
+     * the server finds the ACTIVE device, sends OTP, creates a pending transfer.
+     */
+    suspend fun startTransferFromNewDevice(): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = flow.value?.token ?: error("no JWT session")
+            val deviceHash = DeviceIdentity.getDeviceHash(appContext ?: error("AuthStore.init not called"))
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/devices/transfer/start").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("X-Device-Hash", deviceHash)
+                setRequestProperty("Content-Type", "application/json")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                con.outputStream.use { it.write(JSONObject().toString().toByteArray()) }
+                val code = con.responseCode
+                val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val j = JSONObject(body)
+                if (code in 200..299) {
+                    j.optJSONObject("data")?.optString("transfer_id") ?: ""
+                } else {
+                    throw AuthException(j.optJSONObject("error")?.optString("message")?.takeIf { it.isNotEmpty() })
+                }
+            } finally {
+                con.disconnect()
+            }
+        }
+    }
+
+    /** Verify the transfer OTP (JWT-only — works from any signed-in device). */
+    suspend fun verifyTransferOtp(transferId: Long, otp: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        runCatching {
+            val token = flow.value?.token ?: error("no JWT session")
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/devices/transfer/verify").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("Content-Type", "application/json")
+                connectTimeout = 10_000
+                readTimeout = 15_000
+            }
+            try {
+                con.outputStream.use {
+                    it.write(JSONObject().put("transfer_id", transferId).put("otp_code", otp).toString().toByteArray())
+                }
+                val code = con.responseCode
+                val body = (if (code in 200..299) con.inputStream else con.errorStream)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val j = JSONObject(body)
+                if (code in 200..299) {
+                    j.optJSONObject("data")?.optBoolean("verified", false) ?: false
+                } else {
+                    throw AuthException(j.optJSONObject("error")?.optString("message")?.takeIf { it.isNotEmpty() })
+                }
+            } finally {
+                con.disconnect()
+            }
         }
     }
 

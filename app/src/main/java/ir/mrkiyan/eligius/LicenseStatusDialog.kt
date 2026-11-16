@@ -37,7 +37,7 @@ fun LicenseStatusDialog(
             "دستگاه دیگری فعال است",
             "این حساب روی دستگاه دیگری فعال است" +
                 (activeDeviceId?.let { " (شناسه دستگاه: $it)" } ?: "") +
-                ".\n\nبرای استفاده از این دستگاه، ابتدا از دستگاه فعلی در بخش «حساب» درخواست انتقال با کد پیامکی بدهید؛ سپس کد دریافتی را برای تأیید وارد کنید.",
+                ".\n\nبرای استفاده از این دستگاه، از بخش «حساب» روی همین دستگاه درخواست انتقال با کد پیامکی بدهید و کد دریافتی را روی همین دستگاه وارد کنید؛ یا از دستگاه فعلی درخواست انتقال بدهید و کد را روی دستگاه جدید وارد کنید.",
             false
         )
         error == "LICENSE_REVOKED" -> Quadruple(
@@ -102,6 +102,22 @@ fun LicenseStatusDialog(
             }
         }
     )
+}
+
+/**
+ * Phase 5b preview (owner requirement: changed Compose files carry previews).
+ */
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "LicenseStatusDialog — limit reached")
+@Composable
+private fun LicenseStatusDialogPreview() {
+    MaterialTheme {
+        LicenseStatusDialog(
+            error = "DEVICE_LIMIT_REACHED",
+            activeDeviceId = 21,
+            onChoosePlan = {},
+            onDismiss = {}
+        )
+    }
 }
 
 private data class Quadruple(val title: String, val body: String, val showPlanCta: Boolean)

@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,10 +30,13 @@ import kotlinx.coroutines.launch
 
 /**
  * Devices management card for the Account screen (Roadmap P3 — CD-9):
- * lists the account's devices with the active one highlighted; the ACTIVE
- * device can start an OTP transfer to another registered device. The OTP
- * arrives via SMS and is verified with POST /devices/transfer/verify
- * (JWT-only — works from any signed-in device).
+ * lists the account's devices with the active one highlighted. The OTP
+ * transfer is verified EXCLUSIVELY on the destination device (Phase 5b):
+ *  • a pending/inactive device initiates its own takeover
+ *    (POST /devices/transfer/start from the new device);
+ *  • an active device can start a transfer TO another registered device —
+ *    the OTP entry then appears on the destination (server-reported
+ *    pending transfer), never on the initiating device.
  */
 @Composable
 fun DevicesCard() {
@@ -60,6 +64,17 @@ fun DevicesCard() {
             if (response.isSuccessful && data != null) {
                 devices = data.devices
                 activeDeviceId = data.activeDeviceId
+                // Phase 5b: when THIS device is the DESTINATION of a pending
+                // OTP transfer (initiated from the old device, or an app
+                // restart mid-transfer), surface the OTP entry here — verify
+                // must come from the destination device only.
+                val pending = data.pendingTransfer
+                if (pending != null && transferId == null) {
+                    transferId = pending.transferId
+                    transferTarget = null
+                    otpInput = ""
+                    message = "کد تأیید پیامک‌شده برای انتقال را وارد کنید:"
+                }
             } else {
                 message = RetrofitClient.errorMessage(response) ?: "خطا در دریافت دستگاه‌ها"
             }
@@ -68,6 +83,12 @@ fun DevicesCard() {
     }
 
     LaunchedEffect(Unit) { loadDevices() }
+
+    // Phase 5: SMS Retriever auto-fill for transfer OTP (when transferId is active).
+    val autofill = remember { SmsOtp.start(ctx, onCode = { otpInput = it }, onConsent = { }) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { autofill.dispose() }
+    }
 
     Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -88,6 +109,7 @@ fun DevicesCard() {
 
         devices.forEach { d ->
             val isActive = d.deviceId == activeDeviceId
+            val isThisDevice = d.deviceHash == DeviceIdentity.getDeviceHash(ctx)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -95,14 +117,39 @@ fun DevicesCard() {
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        d.label?.takeIf { it.isNotBlank() } ?: "دستگاه",
+                        (d.label?.takeIf { it.isNotBlank() } ?: "دستگاه") + if (isThisDevice) " (این دستگاه)" else "",
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                     )
                     Text(
-                        if (isActive) "دستگاه فعال" else "غیرفعال",
+                        when {
+                            isActive && isThisDevice -> "دستگاه فعال"
+                            isActive -> "دستگاه فعال (قدیمی)"
+                            isThisDevice -> "این دستگاه (در انتظار انتقال)"
+                            else -> "غیرفعال"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isActive) c.primary else c.onSurfaceVariant
                     )
+                }
+                if (!isActive && isThisDevice) {
+                    // Phase 5: transfer-from-NEW-device — the owner's confirmed flow.
+                    TextButton(onClick = {
+                        scope.launch {
+                            transferBusy = true
+                            message = null
+                            runCatching {
+                                val result = AuthStore.startTransferFromNewDevice()
+                                result.fold(
+                                    onSuccess = { transferIdStr ->
+                                        transferId = transferIdStr.toLongOrNull()
+                                        message = "کد تأیید با پیامک ارسال شد. کد را وارد کنید:"
+                                    },
+                                    onFailure = { message = "خطا: ${it.message}" }
+                                )
+                            }.onFailure { message = "خطای شبکه: ${it.message}" }
+                            transferBusy = false
+                        }
+                    }) { Text(if (transferBusy) "..." else "انتقال اشتراک به این دستگاه") }
                 }
                 if (isActive) {
                     TextButton(onClick = {
@@ -121,10 +168,14 @@ fun DevicesCard() {
                                     )
                                     val data = response.body()?.data
                                     if (response.isSuccessful && data != null) {
-                                        transferId = data.transferId
-                                        transferTarget = target
+                                        // Phase 5b: verify MUST come from the
+                                        // DESTINATION device — the OTP entry
+                                        // appears there (server-list pending
+                                        // transfer), never on this device.
+                                        transferId = null
+                                        transferTarget = null
                                         otpInput = ""
-                                        message = "کد تأیید با پیامک ارسال شد. کد را وارد کنید."
+                                        message = "کد تأیید پیامک‌شده را روی دستگاه جدید وارد کنید تا انتقال کامل شود."
                                     } else {
                                         message = RetrofitClient.errorMessage(response) ?: "خطا در شروع انتقال"
                                     }

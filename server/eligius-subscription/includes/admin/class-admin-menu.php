@@ -48,6 +48,7 @@ class Class_Admin_Menu {
         add_submenu_page('eligius-sub', 'Licenses', 'Licenses', $capability, 'eligius-licenses', [Class_Licenses_Admin::class, 'render']);
         add_submenu_page('eligius-sub', 'Users', 'Users', $capability, 'eligius-users', [Class_Users_Admin::class, 'render']);
         add_submenu_page('eligius-sub', 'Audit Logs', 'Audit Logs', $capability, 'eligius-audit-logs', [Class_Audit_Logs_Admin::class, 'render']);
+        add_submenu_page('eligius-sub', 'Devices', 'Devices', $capability, 'eligius-devices', [Class_Devices_Admin::class, 'render_all']);
     }
 
     /** Shared guard for admin_post actions (nonce + capability). */
@@ -57,6 +58,16 @@ class Class_Admin_Menu {
         }
         $nonce = $_POST['_wpnonce'] ?? '';
         if (!wp_verify_nonce($nonce, 'eligius_sub_admin_action')) {
+            wp_die(esc_html__('Invalid nonce.', 'eligius-subscription'));
+        }
+    }
+
+    /** Shared guard for admin_post device actions (nonce + capability). */
+    public function device_guard() {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+        }
+        if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'eligius_sub_device_admin')) {
             wp_die(esc_html__('Invalid nonce.', 'eligius-subscription'));
         }
     }

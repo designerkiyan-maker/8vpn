@@ -77,7 +77,30 @@ class Class_Database {
         add_option('eligius_sub_license_key_rotation_days', 90);
         add_option('eligius_sub_max_transfers_per_day', 3);
 
+        // Phase 5 migration: add `blocked` column to wp_eligius_devices if missing.
+        self::migrate_add_blocked_column();
+
         return true;
+    }
+
+    /**
+     * Phase 5 migration: add `blocked` column to wp_eligius_devices.
+     * Versioned — idempotent via column_exists check (doc 02 §5.2).
+     */
+    private static function migrate_add_blocked_column() {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eligius_devices';
+        $exists = $wpdb->get_results(
+            "SHOW COLUMNS FROM `{$table}` LIKE 'blocked'",
+            ARRAY_A
+        );
+        if ('' !== $wpdb->last_error || !empty($exists)) {
+            return; // already exists or table missing
+        }
+        $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN `blocked` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_active`");
+        if ('' !== $wpdb->last_error) {
+            error_log('eligius-subscription: failed to add blocked column to ' . $table . ': ' . $wpdb->last_error);
+        }
     }
 
     /** Schema upgrades between stored and current DB versions (doc 02 §5.2). */

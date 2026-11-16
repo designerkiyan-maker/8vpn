@@ -17,6 +17,7 @@ namespace Eligius_Sub\Api;
 defined('ABSPATH') || exit;
 
 use Eligius_Sub\Auth\Class_Auth_Integration;
+use Eligius_Sub\Core\Class_Audit_Log_Repository;
 use Eligius_Sub\Core\Class_UTC_Time;
 use Eligius_Sub\Core\Class_License_Repository;
 use Eligius_Sub\License\Class_License_Issuer;
@@ -98,7 +99,10 @@ class Class_License_Controller extends Class_Api_Controller {
     }
 
     public function route_status(\WP_REST_Request $request) {
-        $device = self::device_or_error($request);
+        // Phase 5b: status works for REGISTERED devices (active OR pending) —
+        // a pending device must learn it is in the transfer flow, not fall
+        // into the trial/purchase path. Blocked devices are still rejected.
+        $device = Class_Auth_Integration::instance()->resolve_registered_device($request);
         if (is_wp_error($device)) {
             return self::fail_wp_error($device);
         }

@@ -90,4 +90,22 @@ class Class_Device_Repository extends Class_Repository_Base {
         $result = $wpdb->update(self::table(), ['last_seen_at' => Class_UTC_Time::mysql_utc()], ['id' => (int) $device_id]);
         return (false === $result) ? false : true;
     }
+
+    /** Phase 5: set blocked state (admin-initiated, backend-enforced). */
+    public static function set_blocked($device_id, $blocked) {
+        global $wpdb;
+        $result = $wpdb->update(self::table(), ['blocked' => $blocked ? 1 : 0], ['id' => (int) $device_id]);
+        return (false === $result) ? false : true;
+    }
+
+    /** Phase 5: check if a device is blocked (backend-enforced in all auth paths). */
+    public static function is_blocked($device_id) {
+        global $wpdb;
+        $table = self::table();
+        $val = $wpdb->get_var($wpdb->prepare(
+            "SELECT blocked FROM `{$table}` WHERE id = %d",
+            (int) $device_id
+        ));
+        return !empty($val);
+    }
 }

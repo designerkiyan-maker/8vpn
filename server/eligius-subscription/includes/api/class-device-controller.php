@@ -130,13 +130,98 @@ class Class_Device_Controller extends Class_Api_Controller {
             return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
         }
         if ($existing) {
+            // Phase 5: blocked device cannot re-register (backend-enforced).
+            if (!empty($existing->blocked)) {
+                $wpdb->query('COMMIT');
+                return self::fail(
+                    'DEVICE_BLOCKED',
+                    'This device has been blocked by an administrator.',
+                    403,
+                    ['device_id' => (int) $existing->id]
+                );
+            }
+
+            if ((int) $existing->is_active) {
+                $wpdb->query('COMMIT');
+                return self::fail(
+                    'CONFLICT',
+                    'This exact device is already registered.',
+                    409,
+                    ['device_id' => (int) $existing->id, 'is_active' => true]
+                );
+            }
+
+            // Phase 5b (owner decision): re-registering an INACTIVE row.
+            // Refresh the stored public key to the caller's current Keystore
+            // key (covers re-installs and old-flow placeholder rows), then:
+            //   • CD-9 slot FREE  → re-activate + bind licenses (register
+            //     semantics apply whenever the slot is free);
+            //   • CD-9 slot TAKEN → keep the row PENDING — the device is
+            //     NEVER activated here; activation happens exclusively via
+            //     the OTP transfer verify.
+            $slot_active_id = (int) Class_Device_Repository::find_active_id($user_id);
+            if ('' !== $wpdb->last_error) {
+                $wpdb->query('ROLLBACK');
+                return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
+            }
+            $upd = $wpdb->query($wpdb->prepare(
+                "UPDATE {$wpdb->prefix}eligius_devices
+                  SET public_key = %s, label = %s
+                  WHERE id = %d AND is_active = 0 AND blocked = 0",
+                $public_key,
+                $label,
+                (int) $existing->id
+            ));
+            if (false === $upd || '' !== $wpdb->last_error) {
+                $wpdb->query('ROLLBACK');
+                return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device key refresh failed.', 500);
+            }
+
+            if (0 === $slot_active_id) {
+                $upd = $wpdb->query($wpdb->prepare(
+                    "UPDATE {$wpdb->prefix}eligius_devices SET is_active = 1 WHERE id = %d",
+                    (int) $existing->id
+                ));
+                if (false === $upd || '' !== $wpdb->last_error) {
+                    $wpdb->query('ROLLBACK');
+                    return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device reactivation failed.', 500);
+                }
+                $bind_err = self::bind_licenses_and_audit($user_id, (int) $existing->id);
+                if (null !== $bind_err) {
+                    return self::fail_wp_error($bind_err); // helper already rolled back
+                }
+                $wpdb->query('COMMIT');
+                $device = Class_Device_Repository::find((int) $existing->id);
+                return self::ok([
+                    'device_id'   => (int) $existing->id,
+                    'device_hash' => $device_hash,
+                    'label'       => (string) ($device->label ?? $label),
+                    'created_at'  => (string) ($device->created_at ?? Class_UTC_Time::mysql_utc()),
+                    'is_active'   => true,
+                    'reactivated' => true,
+                ], 201);
+            }
+
+            $audit_id = Class_Audit_Log_Repository::insert_audit([
+                'user_id'    => (int) $user_id,
+                'device_id'  => (int) $existing->id,
+                'event_type' => 'device.register_pending',
+                'details'    => ['active_device_id' => $slot_active_id, 'key_refreshed' => true],
+            ]);
+            if (0 === $audit_id) {
+                $wpdb->query('ROLLBACK');
+                return self::fail('INTERNAL_ERROR', 'Pending registration audit insert failed.', 500);
+            }
             $wpdb->query('COMMIT');
-            return self::fail(
-                'CONFLICT',
-                'This exact device is already registered.',
-                409,
-                ['device_id' => (int) $existing->id, 'is_active' => (bool) $existing->is_active]
-            );
+            return self::ok([
+                'device_id'        => (int) $existing->id,
+                'device_hash'      => $device_hash,
+                'label'            => $label,
+                'created_at'       => (string) ($existing->created_at ?? Class_UTC_Time::mysql_utc()),
+                'is_active'        => false,
+                'pending_transfer' => true,
+                'active_device_id' => $slot_active_id,
+            ], 201);
         }
 
         // Step 2b: one-active-device under the lock (CD-9) — never auto-replace,
@@ -147,13 +232,41 @@ class Class_Device_Controller extends Class_Api_Controller {
             return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
         }
         if ($active_id > 0) {
+            // Phase 5b (owner decision): a BRAND-NEW device on an account
+            // whose slot is occupied registers as PENDING (inactive). The
+            // device is NEVER activated here — activation happens
+            // exclusively via the OTP transfer verify; licenses stay with
+            // the active device. CD-9 stays intact (row created with
+            // is_active = 0) and the register rate limit (10/h/user)
+            // still applies.
+            $device_id = Class_Device_Repository::create($user_id, $device_hash, $public_key, $label, 0, 'app');
+            if (0 === $device_id || '' !== $wpdb->last_error) {
+                $wpdb->query('ROLLBACK');
+                return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device insert failed.', 500);
+            }
+            // NO license binding — the active device keeps its licenses;
+            // they move atomically in transfer verify only.
+            $audit_id = Class_Audit_Log_Repository::insert_audit([
+                'user_id'    => (int) $user_id,
+                'device_id'  => (int) $device_id,
+                'event_type' => 'device.register_pending',
+                'details'    => ['active_device_id' => (int) $active_id],
+            ]);
+            if (0 === $audit_id) {
+                $wpdb->query('ROLLBACK');
+                return self::fail('INTERNAL_ERROR', 'Pending registration audit insert failed.', 500);
+            }
             $wpdb->query('COMMIT');
-            return self::fail(
-                'DEVICE_LIMIT_REACHED',
-                'This account already has an active device. Transfer it first (OTP).',
-                409,
-                ['active_device_id' => $active_id]
-            );
+            $device = Class_Device_Repository::find((int) $device_id);
+            return self::ok([
+                'device_id'        => (int) $device_id,
+                'device_hash'      => $device_hash,
+                'label'            => (string) ($device->label ?? $label),
+                'created_at'       => (string) ($device->created_at ?? Class_UTC_Time::mysql_utc()),
+                'is_active'        => false,
+                'pending_transfer' => true,
+                'active_device_id' => (int) $active_id,
+            ], 201);
         }
 
         // Step 3: insert the new device (explicit result check).
@@ -162,6 +275,32 @@ class Class_Device_Controller extends Class_Api_Controller {
             $wpdb->query('ROLLBACK');
             return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device insert failed.', 500);
         }
+
+        // Steps 4-5: bind ACTIVE/TRIAL licenses + audited bind (doc 02 §2.8.3).
+        $bind_err = self::bind_licenses_and_audit($user_id, (int) $device_id);
+        if (null !== $bind_err) {
+            return self::fail_wp_error($bind_err); // helper already rolled back
+        }
+
+        $wpdb->query('COMMIT');
+
+        $device = Class_Device_Repository::find((int) $device_id);
+        return self::ok([
+            'device_id'   => (int) $device_id,
+            'device_hash' => $device_hash,
+            'label'       => (string) ($device->label ?? $label),
+            'created_at'  => (string) ($device->created_at ?? Class_UTC_Time::mysql_utc()),
+        ], 201);
+    }
+
+    /**
+     * Bind ACTIVE/TRIAL licenses to a device and write the audited-bind
+     * record (doc 02 §2.8.3) — MUST be called inside an OPEN transaction.
+     * On any failure the transaction is rolled back and a typed error is
+     * returned (the caller responds with fail_wp_error).
+     */
+    private static function bind_licenses_and_audit($user_id, $device_id): ?\WP_Error {
+        global $wpdb;
 
         // Step 4: bind ACTIVE/TRIAL licenses to this device (0 rows is valid).
         $bound = $wpdb->query($wpdb->prepare(
@@ -174,7 +313,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         ));
         if (false === $bound || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'License bind failed.', 500);
+            return new \WP_Error('eligius_internal_error', $wpdb->last_error ?: 'License bind failed.', ['status' => 500]);
         }
 
         // Step 5: audit row — an unaudited bind must not commit (doc 02 §2.8.3).
@@ -193,7 +332,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             ));
             if ('' !== $wpdb->last_error) {
                 $wpdb->query('ROLLBACK');
-                return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
+                return new \WP_Error('eligius_internal_error', $wpdb->last_error, ['status' => 500]);
             }
             if ($bound_license_id > 0) {
                 $event = Class_Audit_Log_Repository::insert_license_event([
@@ -215,19 +354,10 @@ class Class_Device_Controller extends Class_Api_Controller {
             ]);
             if (0 === $audit_id) {
                 $wpdb->query('ROLLBACK');
-                return self::fail('INTERNAL_ERROR', 'Device audit insert failed.', 500);
+                return new \WP_Error('eligius_internal_error', 'Device audit insert failed.', ['status' => 500]);
             }
         }
-
-        $wpdb->query('COMMIT');
-
-        $device = Class_Device_Repository::find((int) $device_id);
-        return self::ok([
-            'device_id'   => (int) $device_id,
-            'device_hash' => $device_hash,
-            'label'       => (string) ($device->label ?? $label),
-            'created_at'  => (string) ($device->created_at ?? Class_UTC_Time::mysql_utc()),
-        ], 201);
+        return null;
     }
 
     public function route_challenge(\WP_REST_Request $request) {
@@ -317,21 +447,64 @@ class Class_Device_Controller extends Class_Api_Controller {
             ];
         }
 
+        // Phase 5b: when the CALLING device is the DESTINATION of a pending
+        // OTP transfer (e.g. the old device initiated the transfer), surface
+        // it so the destination device can offer the OTP entry UI — verify
+        // must come from the destination device (transfer_id alone is never
+        // accepted from anywhere else).
+        $pending_transfer = null;
+        $caller_hash = Class_Auth_Integration::instance()->get_device_hash($request);
+        if (null !== $caller_hash) {
+            $caller = Class_Device_Repository::find_by_hash(get_current_user_id(), $caller_hash);
+            if ($caller && '' === $GLOBALS['wpdb']->last_error) {
+                $pending = $GLOBALS['wpdb']->get_row($GLOBALS['wpdb']->prepare(
+                    "SELECT id, expires_at FROM {$GLOBALS['wpdb']->prefix}eligius_device_transfers
+                      WHERE user_id = %d AND status = 'PENDING' AND expires_at > %s AND to_device_id = %d
+                      ORDER BY id DESC LIMIT 1",
+                    (int) get_current_user_id(),
+                    Class_UTC_Time::mysql_utc(),
+                    (int) $caller->id
+                ));
+                if ($pending && '' === $GLOBALS['wpdb']->last_error) {
+                    $pending_transfer = [
+                        'transfer_id' => (int) $pending->id,
+                        'expires_at'  => (string) $pending->expires_at,
+                        'expires_in'  => max(0, strtotime((string) $pending->expires_at) - time()),
+                    ];
+                }
+            }
+        }
+
         return self::ok([
-            'devices'         => $list,
+            'devices'          => $list,
             'active_device_id' => $active_id,
+            'pending_transfer' => $pending_transfer,
         ]);
     }
 
     public function route_transfer_start(\WP_REST_Request $request) {
-        $device = self::device_or_error($request);
-        if (is_wp_error($device)) {
-            return self::fail_wp_error($device);
+        // Phase 5 (owner decision): the transfer is initiated from the NEW
+        // device. The calling device (identified by X-Device-Hash) may be
+        // ACTIVE (old flow — targets to_device_hash from body) or INACTIVE
+        // (new flow — the server finds the currently ACTIVE device as the
+        // "from" device and targets the caller).
+        $auth = Class_Auth_Integration::instance();
+        $user_check = $auth->permission_user($request);
+        if (is_wp_error($user_check)) {
+            return self::fail_wp_error($user_check);
         }
 
-        $to_hash = Class_Device_Repository::normalize_hash($request->get_param('to_device_hash'));
-        if (null === $to_hash) {
-            return self::fail('VALIDATION_ERROR', 'to_device_hash must be 64 hex chars.', 400);
+        $device_hash = $auth->get_device_hash($request);
+        if (null === $device_hash) {
+            return self::fail('VALIDATION_ERROR', 'X-Device-Hash must be 64 hex chars.', 400);
+        }
+
+        $device = \Eligius_Sub\Core\Class_Device_Repository::find_by_hash(get_current_user_id(), $device_hash);
+        if (!$device) {
+            return self::fail('DEVICE_NOT_BOUND', 'Device is not registered for this account.', 403);
+        }
+        if (!empty($device->blocked)) {
+            return self::fail('DEVICE_BLOCKED', 'This device has been blocked by an administrator.', 403);
         }
 
         // 3 transfers/day/user (doc 05 §6 security controls).
@@ -342,7 +515,22 @@ class Class_Device_Controller extends Class_Api_Controller {
             return $exceeded;
         }
 
-        $result = Class_Device_Transfer::instance()->start(get_current_user_id(), $device, $to_hash);
+        if ((int) $device->is_active) {
+            // Old flow: active device initiates to a target hash (requires to_device_hash in body).
+            $to_hash = Class_Device_Repository::normalize_hash($request->get_param('to_device_hash'));
+            if (null === $to_hash) {
+                return self::fail('VALIDATION_ERROR', 'to_device_hash must be 64 hex chars.', 400);
+            }
+            $result = Class_Device_Transfer::instance()->start(get_current_user_id(), $device, $to_hash);
+        } else {
+            // New flow (Phase 5): the calling device is INACTIVE → it wants to
+            // take over from the currently ACTIVE device.
+            $result = Class_Device_Transfer::instance()->start_from_new_device(
+                get_current_user_id(),
+                $device_hash
+            );
+        }
+
         if (is_wp_error($result)) {
             return self::fail_wp_error($result);
         }
@@ -351,9 +539,19 @@ class Class_Device_Controller extends Class_Api_Controller {
     }
 
     public function route_transfer_verify(\WP_REST_Request $request) {
-        $auth_check = Class_Auth_Integration::instance()->permission_user($request);
+        $auth = Class_Auth_Integration::instance();
+        $auth_check = $auth->permission_user($request);
         if (is_wp_error($auth_check)) {
             return self::fail_wp_error($auth_check);
+        }
+
+        // Phase 5b (owner decision): the verify MUST come from the DESTINATION
+        // device. Resolve the caller's device row from X-Device-Hash (blocked
+        // devices rejected here too) and enforce it against to_device_id
+        // inside the transaction — transfer_id alone is never trusted.
+        $caller_device_check = $auth->resolve_registered_device($request);
+        if (is_wp_error($caller_device_check)) {
+            return self::fail_wp_error($caller_device_check);
         }
 
         $transfer_id = (int) $request->get_param('transfer_id');
@@ -374,7 +572,12 @@ class Class_Device_Controller extends Class_Api_Controller {
             return $exceeded;
         }
 
-        $result = Class_Device_Transfer::instance()->verify(get_current_user_id(), $transfer_id, $otp_code);
+        $result = Class_Device_Transfer::instance()->verify(
+            get_current_user_id(),
+            $transfer_id,
+            $otp_code,
+            (int) $caller_device_check->id
+        );
         if (is_wp_error($result)) {
             return self::fail_wp_error($result);
         }

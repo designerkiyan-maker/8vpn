@@ -245,4 +245,31 @@ class LicenseStoreTest {
         )
         assertTrue("offline mode flagged", result.licenseState?.offline == true)
     }
+
+    // --- 6. Phase 5b: trial eligibility is SERVER-driven + second trial -------
+    // The banner must only appear when the backend reports NO_ACTIVE_LICENSE
+    // with trial_eligible=true; this account already used its trial, so the
+    // flag must be false (never offered again) and a second grant → 409.
+    @Test
+    fun t6_trialEligibility_isServerDriven_secondTrialRejected() {
+        val token = jwtToken()
+        val (code, j) = http("GET", "$base/eligius/v1/licenses/status", token, null)
+        assertEquals("status fetch", 200, code)
+        val data = j.optJSONObject("data")
+        assertNotNull("status data", data)
+        if (data!!.optBoolean("valid", false) == false &&
+            data.optString("error") == "NO_ACTIVE_LICENSE"
+        ) {
+            // This account has used its trial (t1 grants it) — eligibility
+            // must be FALSE even though no valid license exists right now.
+            assertFalse(
+                "used-trial account must not be trial-eligible",
+                data.optBoolean("trial_eligible", false)
+            )
+        }
+        // Second grant attempt → 409 TRIAL_ALREADY_USED (or 429 rate limit on
+        // immediate re-runs) — never a second trial.
+        val (tcode, _) = http("POST", "$base/eligius/v1/licenses/trial", token, JSONObject())
+        assertTrue("second trial must be rejected: $tcode", tcode == 409 || tcode == 429)
+    }
 }
