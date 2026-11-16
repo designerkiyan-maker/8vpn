@@ -672,9 +672,11 @@ class Eligius_Sub_Payment_Processor {
 | Rule | Implementation |
 |------|----------------|
 | 30 days | `expires_at = started_at + 30 days` (server clock) |
-| One per device | `device_hash` uniqueness in `eligius_licenses` + `eligius_devices` |
-| Reinstall protection | `device_hash = SHA-256(pubkey || ANDROID_ID)` survives reinstall if Keystore intact |
-| No account sharing | Trial bound to `device_hash`, not account |
+| Trial eligibility | One trial per account (`user_id`) |
+| Enforcement | `has_trial_ever(user_id)` checks all license statuses and all devices |
+| Device binding | Trial is bound to the current device for enforcement; device identity is not the eligibility key |
+| Reinstallation protection | Uninstalling or clearing application data cannot grant another trial to the same account |
+| Business rule | Account-keyed trial policy, consistent with CD-6 |
 | Conversion | Payment during trial → upgrade to paid, extend from trial expiry |
 
 ### Device Transfer Workflow
