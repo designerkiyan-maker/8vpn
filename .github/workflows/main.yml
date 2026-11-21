@@ -249,6 +249,59 @@ jobs:
           cp *universal*.apk   ../../../../../out/Eligius-universal.apk
           ls -l ../../../../../out
 
+      # P8.4 (H-1): post-build signature verification — runs BEFORE any deploy
+      # or release publish; any failure fails the job so nothing is released.
+      #   1) the APK must NOT be signed with the debug certificate;
+      #   2) the APK certificate SHA-256 must EXACTLY match the certificate of
+      #      the keystore this build was signed with (keytool -list comparison
+      #      — not just a DN check). No secret values are printed: GitHub masks
+      #      masked-secret occurrences and keytool never echoes argv.
+      - name: Verify release signatures (fail on debug-signed / wrong key)
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
+          BT="${BT%/}"
+          APKSIGNER="$BT/apksigner"
+          echo "Using build-tools: $BT"
+          fail=0
+          for f in out/*.apk; do
+            echo "── $f"
+            # P8.4.1 (fix 2): the explicit `apksigner verify` is AUTHORITATIVE —
+            # its exit code gates the flow BEFORE any certificate extraction, so
+            # an invalid/missing signature can never pass this step.
+            if ! "$APKSIGNER" verify "$f"; then
+              echo "::error::$f failed apksigner verify — invalid or missing signature."
+              fail=1
+              continue
+            fi
+            CERTS="$("$APKSIGNER" verify --print-certs "$f")"
+            echo "$CERTS" | sed 's/^/  /'
+            if echo "$CERTS" | grep -q "CN=Android Debug"; then
+              echo "::error::$f is signed with the DEBUG certificate — refusing to release."
+              fail=1
+              continue
+            fi
+            # P8.4.1 (fix 1): normalize BOTH sides — strip ':' separators and
+            # lowercase (apksigner prints lowercase, keytool prints UPPERCASE;
+            # comparing raw strings always mismatched — found in 8.4 review).
+            APK_SHA="$(echo "$CERTS" | awk '/SHA-256 digest:/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            KS_SHA="$(keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" 2>/dev/null | awk '/SHA256:/ {print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            if [ -z "$APK_SHA" ] || [ -z "$KS_SHA" ]; then
+              echo "::error::could not extract the certificate SHA-256 (APK or keystore) for $f"
+              fail=1
+              continue
+            fi
+            if [ "$APK_SHA" != "$KS_SHA" ]; then
+              echo "::error::$f certificate ($APK_SHA) does not match the release keystore ($KS_SHA) — refusing to release."
+              fail=1
+              continue
+            fi
+            echo "  ✓ certificate matches the release keystore"
+          done
+          exit $fail
+
       - name: Deploy APK to update server (wp.mrkiyan.ir)
         if: startsWith(github.ref, 'refs/tags/v')
         env:

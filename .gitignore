@@ -21,3 +21,11 @@ app/src/main/jniLibs/
 
 # Composer artifacts for the WordPress plugin (never commit)
 server/eligius-subscription/vendor/
+
+# P8.4 (H-1): private signing material — NEVER commit. The example template
+# (keystore.properties.example) stays committable; the real files never do.
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
