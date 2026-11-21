@@ -249,22 +249,36 @@ jobs:
           cp *universal*.apk   ../../../../../out/Eligius-universal.apk
           ls -l ../../../../../out
 
-      # P8.4 (H-1): post-build signature verification — runs BEFORE any deploy
-      # or release publish; any failure fails the job so nothing is released.
-      #   1) the APK must NOT be signed with the debug certificate;
-      #   2) the APK certificate SHA-256 must EXACTLY match the certificate of
-      #      the keystore this build was signed with (keytool -list comparison
-      #      — not just a DN check). No secret values are printed: GitHub masks
-      #      masked-secret occurrences and keytool never echoes argv.
+      # P8.4 (H-1) + P8.8.1: post-build signature verification — runs BEFORE
+      # any deploy or release publish; any failure fails the job so nothing is
+      # released. Layers per APK:
+      #   1) `apksigner verify` must succeed (exit code is authoritative);
+      #   2) NOT signed with the debug certificate;
+      #   3) certificate SHA-256 must EXACTLY match the keystore this build
+      #      was signed with (keytool -list comparison, not just a DN check);
+      #   4) certificate SHA-256 must ALSO equal the PINNED OFFICIAL Eligius
+      #      release certificate fingerprint — a wrong/rogue KEYSTORE_BASE64
+      #      secret therefore can never pass, even when the APK matches its
+      #      own keystore. No secret values are printed anywhere.
       - name: Verify release signatures (fail on debug-signed / wrong key)
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          # P8.8.1: pinned OFFICIAL Eligius release certificate fingerprint —
+          # public data (a cert fingerprint is not a secret).
+          OFFICIAL_SHA256: 989D1227D490AA433E1BE5DEC29BCEA30544088A32FF18679ACBE64BCEC88557
         run: |
           BT="$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
           BT="${BT%/}"
           APKSIGNER="$BT/apksigner"
           echo "Using build-tools: $BT"
+          # normalize + format-check the pinned official fingerprint
+          OFFICIAL="$(echo "$OFFICIAL_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if ! echo "$OFFICIAL" | grep -qE '^[0-9a-f]{64}$'; then
+            echo "::error::OFFICIAL_SHA256 is not a 64-char hex fingerprint — refusing to release."
+            exit 1
+          fi
+          echo "Official certificate fingerprint: $OFFICIAL"
           fail=0
           for f in out/*.apk; do
             echo "── $f"
@@ -295,6 +309,14 @@ jobs:
             fi
             if [ "$APK_SHA" != "$KS_SHA" ]; then
               echo "::error::$f certificate ($APK_SHA) does not match the release keystore ($KS_SHA) — refusing to release."
+              fail=1
+              continue
+            fi
+            # P8.8.1: the certificate must be the PINNED OFFICIAL one — a wrong
+            # or rogue KEYSTORE_BASE64 secret fails here even though the APK
+            # matches its own keystore.
+            if [ "$APK_SHA" != "$OFFICIAL" ]; then
+              echo "::error::$f certificate ($APK_SHA) does not match the OFFICIAL Eligius release certificate ($OFFICIAL) — refusing to release."
               fail=1
               continue
             fi
