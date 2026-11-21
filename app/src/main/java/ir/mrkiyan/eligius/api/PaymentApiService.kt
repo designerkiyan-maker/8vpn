@@ -24,6 +24,15 @@ interface PaymentApiService {
         @Path("payment_id") paymentId: Long
     ): Response<ApiResponse<PaymentStatusData>>
 
+    /** Phase 6 — user-initiated reconciliation: the server re-runs S2S
+     *  verification for an INITIATED payment using the STORED authority and
+     *  amount (client input is never trusted). Fails closed with 503
+     *  RATE_LIMIT_UNAVAILABLE when the rate limiter is degraded. */
+    @POST("payments/{payment_id}/reconcile")
+    suspend fun reconcilePayment(
+        @Path("payment_id") paymentId: Long
+    ): Response<ApiResponse<PaymentStatusData>>
+
     @GET("payments/history")
     suspend fun getPaymentHistory(
         @Query("page") page: Int = 1

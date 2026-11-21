@@ -8,11 +8,20 @@
  * sequential rewrites), scenarios 15-18b state-guarded, deterministic RESULT.
  */
 
-if (!defined('ABSPATH')) { define('ABSPATH', 'E:/xampp/htdocs/wp/'); }
+if (!defined('ABSPATH')) { define('ABSPATH', getenv('ELIGIUS_WP_ROOT') ?: 'E:/xampp/htdocs/wp/'); } // CI-portable root (P6)
+
+function ensure_pf_user($wpdb, $id, $login) {
+    if ($wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->users} WHERE ID = %d", $id))) return;
+    $wpdb->query($wpdb->prepare(
+        "INSERT INTO {$wpdb->users} (ID, user_login, user_pass, user_email, user_registered)
+         VALUES (%d, %s, %s, %s, %s)",
+        $id, 'p6user' . $id, wp_hash_password('p6-pass-' . $id),
+        'p6user' . $id . '@example.invalid', gmdate('Y-m-d H:i:s')));
+}
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 $_SERVER['HTTP_USER_AGENT'] = 'eligius-test';
 
-require 'E:/xampp/htdocs/wp/wp-load.php';
+require ABSPATH . 'wp-load.php';
 
 $pass = 0; $fail = 0;
 function T($label, $cond) {
@@ -22,15 +31,19 @@ function T($label, $cond) {
 }
 
 // Register the Mock gateway + force it for the 'mock' key.
-require 'E:/xampp/htdocs/8VPN/server/eligius-subscription/tests/integration/class-mock-gateway.php';
+// Fresh-install portability: fixture users referenced by literal ID.
+for ($i = 10; $i <= 16; $i++) { ensure_pf_user($wpdb, $i, 'p6user' . $i); }
+require_once __DIR__ . '/class-mock-gateway.php';
 add_filter('eligius_sub_payment_gateway_instance', function ($instance, $key) {
     if ('mock' === $key) return new \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway();
     return $instance;
 }, 10, 2);
 
 use Eligius_Sub\Payment\Class_Payment_Processor;
+use Eligius_Sub\Core\Class_Device_Repository as PFDeviceRepo;
 use Eligius_Sub\Payment\Gateways\Class_Mock_Gateway;
 use Eligius_Sub\License\Class_License_Manager;
+use Eligius_Sub\Core\Class_Device_Repository;
 
 $proc = Class_Payment_Processor::instance();
 $mgr = Class_License_Manager::instance();
@@ -91,25 +104,27 @@ T('4b. exactly one ACTIVE license after duplicate', 1 === $cnt);
 \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway::reset(true);
 $created2 = $proc->create_payment(16, 'monthly', 'mock');
 $auth2 = $created2['authority'];
-$script = 'E:/xampp/htdocs/wp/wp-content/plugins/eligius-subscription/tests/integration/run-callback.php';
+$script = ABSPATH . 'wp-content/plugins/eligius-subscription/tests/integration/run-callback.php';
 file_put_contents($script, '<?php
-if (!defined("ABSPATH")) { define("ABSPATH", "E:/xampp/htdocs/wp/"); }
+if (!defined("ABSPATH")) { define("ABSPATH", getenv("ELIGIUS_WP_ROOT") ?: "E:/xampp/htdocs/wp/"); }
 $_SERVER["REMOTE_ADDR"] = "127.0.0.1"; $_SERVER["HTTP_USER_AGENT"] = "eligius-test";
-require "E:/xampp/htdocs/wp/wp-load.php";
+require ABSPATH . "wp-load.php";
 if (!class_exists("Eligius_Sub\\Payment\\Gateways\\Class_Mock_Gateway")) {
-    require "E:/xampp/htdocs/8VPN/server/eligius-subscription/tests/integration/class-mock-gateway.php";
+    require_once __DIR__ . "/class-mock-gateway.php";
 }
 add_filter("eligius_sub_payment_gateway_instance", function ($i, $k) { if ("mock" === $k) return new \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway(); return $i; }, 10, 2);
 \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway::reset(true);
 $r = \Eligius_Sub\Payment\Class_Payment_Processor::instance()->handle_callback("mock", ["authority" => $argv[1], "status" => "OK"]);
 echo is_wp_error($r) ? "ERR" . $r->get_error_code() : $r["status"] . ($r["duplicate"] ? "-DUP" : "-FRESH");
 ');
-$cmd1 = 'E:/xampp/php/php.exe "' . $script . '" ' . escapeshellarg($auth2) . ' > C:/Users/Bardia/AppData/Local/Temp/cb1.txt 2>&1';
-$cmd2 = 'E:/xampp/php/php.exe "' . $script . '" ' . escapeshellarg($auth2) . ' > C:/Users/Bardia/AppData/Local/Temp/cb2.txt 2>&1';
+$phpBin = getenv('P6_PHP_BIN') ?: 'E:/xampp/php/php.exe';
+$tmpOut = sys_get_temp_dir();
+$cmd1 = escapeshellcmd($phpBin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($auth2) . ' > ' . escapeshellarg($tmpOut . '/cb1.txt') . ' 2>&1';
+$cmd2 = escapeshellcmd($phpBin) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($auth2) . ' > ' . escapeshellarg($tmpOut . '/cb2.txt') . ' 2>&1';
 $p1 = popen($cmd1, 'r'); pclose($p1);
 $p2 = popen($cmd2, 'r'); pclose($p2);
-$r1 = trim(file_get_contents('C:/Users/Bardia/AppData/Local/Temp/cb1.txt'));
-$r2 = trim(file_get_contents('C:/Users/Bardia/AppData/Local/Temp/cb2.txt'));
+$r1 = trim(file_get_contents($tmpOut . '/cb1.txt'));
+$r2 = trim(file_get_contents($tmpOut . '/cb2.txt'));
 $fresh = substr_count($r1 . $r2, 'VERIFIED-FRESH');
 $dup = substr_count($r1 . $r2, 'VERIFIED-DUP');
 T('5. concurrent callbacks → exactly one FRESH activation (' . $r1 . ' | ' . $r2 . ')', 1 === $fresh && 1 === $dup);
@@ -143,15 +158,20 @@ T('8. IRT→IRR conversion consistent (400,000 IRT → 4,000,000 IRR)', !is_wp_e
 // ------------------------------------------ 9. activation failure → recovery
 \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway::reset(true);
 $created6 = $proc->create_payment(15, 'monthly', 'mock');
-// Pre-block: user 15 already has an ACTIVE monthly → activation attempts a
-// second ACTIVE monthly → uniq_user_active_plan violation → rollback.
+// Phase 6: a same-plan renewal now EXTENDS correctly (the activation-fix), so
+// the rollback trigger is a FORCED audit failure instead of the old duplicate
+// insert: block BOTH audit paths for the activation event → the unaudited
+// activation must roll the whole callback back (doc 02 §2.8.3).
+$wpdb->query("CREATE TRIGGER p6_block_lev BEFORE INSERT ON wp_eligius_license_events FOR EACH ROW BEGIN IF NEW.event_type IN ('license.renewed','license.activated') THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p6-block'; END IF; END");
+$wpdb->query("CREATE TRIGGER p6_block_au BEFORE INSERT ON wp_eligius_audit_logs FOR EACH ROW BEGIN IF NEW.event_type IN ('license.renewed','license.activated') THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p6-block'; END IF; END");
 $cb6 = $proc->handle_callback('mock', ['authority' => $created6['authority'], 'status' => 'OK']);
+$wpdb->query("DROP TRIGGER IF EXISTS p6_block_lev");
+$wpdb->query("DROP TRIGGER IF EXISTS p6_block_au");
 $row7 = $wpdb->get_row("SELECT * FROM wp_eligius_payments WHERE id = " . $created6['payment_id']);
 T('9. activation failure → full ROLLBACK, payment stays INITIATED (retryable)',
     (is_wp_error($cb6) && 'eligius_activation_failed' === $cb6->get_error_code()) && 'INITIATED' === $row7->status);
 
-// Retry after clearing the conflicting license → activation succeeds.
-$wpdb->query("DELETE FROM wp_eligius_licenses WHERE user_id = 15 AND plan_key = 'monthly' AND status = 'ACTIVE'");
+// Retry without the trigger → activation succeeds.
 $cb6b = $proc->handle_callback('mock', ['authority' => $created6['authority'], 'status' => 'OK']);
 T('9b. recovery: retried callback activates successfully', !is_wp_error($cb6b) && 'VERIFIED' === $cb6b['status']);
 
@@ -269,6 +289,41 @@ $cbS = $proc->handle_callback('mock', ['authority' => $createdS['authority'], 's
 T('18. stale PENDING (>10min) recovered → VERIFIED', !is_wp_error($cbS) && 'VERIFIED' === $cbS['status']);
 $paidRows = (int) $wpdb->get_var("SELECT COUNT(*) FROM wp_eligius_licenses l JOIN wp_eligius_payments p ON l.id = p.license_id WHERE p.id = " . $createdS['payment_id'] . " AND l.status = 'ACTIVE'");
 T('18b. exactly one license from recovered callback', 1 === $paidRows);
+
+// ------------------------------------------ 19. renewal vs trial shadowing (P6 fix)
+// Phase 6 regression: buy monthly → claim the account trial AFTER purchase →
+// buy monthly AGAIN → the renewal-extend must win over the TRIAL-conversion
+// branch (get_latest returns the newer TRIAL row). Old behavior: INSERT →
+// uniq_user_active_plan violation → permanent callback retry-fail.
+// Dedicated user 10: fresh trial history (no other scenario touches it).
+\Eligius_Sub\Payment\Gateways\Class_Mock_Gateway::reset(true);
+$wpdb->query("DELETE FROM wp_eligius_licenses WHERE user_id = 10");
+$wpdb->query("DELETE FROM wp_eligius_payments WHERE user_id = 10");
+$wpdb->query("DELETE FROM wp_eligius_devices WHERE user_id = 10");
+// The trial binds informationally to the CURRENT ACTIVE device — fixture one.
+Class_Device_Repository::create(10, str_repeat('8', 64), 'p6-pk-10', 'P6 Dev 10', 1, 'test');
+$firstP = $proc->create_payment(10, 'monthly', 'mock');
+$firstC = $proc->handle_callback('mock', ['authority' => $firstP['authority'], 'status' => 'OK']);
+T('19. first monthly purchase → VERIFIED', !is_wp_error($firstC) && 'VERIFIED' === $firstC['status']);
+// Claim the one-time trial AFTER the purchase (CD-6: one trial per account).
+$trialP = \Eligius_Sub\License\Class_Trial_Manager::instance()->grant(10, str_repeat('8', 64));
+T('19b. trial granted after purchase (one per account)', !is_wp_error($trialP));
+$expiryBefore = (string) $wpdb->get_var($wpdb->prepare(
+    "SELECT expires_at FROM wp_eligius_licenses WHERE id = %d", $firstC['license_id']));
+$secondP = $proc->create_payment(10, 'monthly', 'mock');
+$secondC = $proc->handle_callback('mock', ['authority' => $secondP['authority'], 'status' => 'OK']);
+T('19c. second monthly purchase with a TRIAL row present → VERIFIED (extend wins)',
+    !is_wp_error($secondC) && 'VERIFIED' === $secondC['status']);
+$monthlyCount = (int) $wpdb->get_var("SELECT COUNT(*) FROM wp_eligius_licenses WHERE user_id = 10 AND plan_key = 'monthly' AND status = 'ACTIVE'");
+$extendedDays = (int) $wpdb->get_var($wpdb->prepare(
+    "SELECT DATEDIFF(%s, %s)",
+    (string) $wpdb->get_var($wpdb->prepare(
+        "SELECT expires_at FROM wp_eligius_licenses WHERE id = %d", $secondC['license_id'])),
+    $expiryBefore));
+T('19d. exactly ONE active monthly row (id reused), extended ~30d by the second purchase',
+    1 === $monthlyCount && (int) $secondC['license_id'] === (int) $firstC['license_id'] && $extendedDays >= 28 && $extendedDays <= 31);
+
+echo "\nRESULT: $pass passed, $fail failed\n";
 
 echo "\nRESULT: $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);

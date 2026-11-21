@@ -1,0 +1,169 @@
+# Eligius — Phase 6 test pipeline (Roadmap P6 AC: "CI pipeline runs tests on
+# every PR"). Runs on push + pull_request. NO production deploy job exists in
+# this workflow (deployment remains the separate release process in main.yml).
+#
+# Boundaries honored:
+#  - No merchant credential is needed: the gateway suites use the repo's
+#    Mock gateway / HTTP stubs. Mock success is NOT real-gateway proof (H-2).
+#  - No real SMS, no production secrets, no Keystore (H-1 stays unresolved).
+#  - Android Instrumented tests are NOT enabled here: standard GitHub runners
+#    lack KVM acceleration for the emulator (documented limitation — they run
+#    on the dev workstation).
+name: tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  php-lint:
+    name: PHP lint (eligius-subscription)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: sodium, openssl, mysqli
+      - name: Lint every plugin PHP file
+        run: |
+          find server/eligius-subscription -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  php-unit:
+    name: PHP unit (backend logic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: sodium, openssl
+      - name: Run zero-dependency unit suite
+        run: php server/eligius-subscription/tests/unit/backend/run-tests.php
+
+  php-integration:
+    name: PHP integration (WordPress + MariaDB)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress
+          MYSQL_USER: wordpress
+          MYSQL_PASSWORD: wordpress
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: sodium, openssl, mysqli, curl, mbstring, pcov
+          # Tests never require a real SMS provider: eligius_otp_send_sms is
+          # stubbed inside the suites (documented in each file's header).
+      - name: Install wp-cli
+        run: |
+          curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp
+      - name: Provision WordPress
+        run: |
+          wp core download --path=wp --locale=en_US
+          wp config create --path=wp --dbname=wordpress --dbuser=wordpress \
+            --dbpass=wordpress --dbhost=127.0.0.1:3306 --skip-salts
+          wp db create --path=wp
+          wp core install --path=wp --url=http://localhost:8080 \
+            --title="Eligius CI" --admin_user=admin --admin_password=admin-pass \
+            --admin_email=admin@example.invalid --skip-email
+      - name: Activate eligius-subscription
+        run: |
+          cp -r server/eligius-subscription wp/wp-content/plugins/eligius-subscription
+          wp plugin activate eligius-subscription --path=wp
+      # Phase 6: PCOV-backed coverage for the integration suites (Linux-only
+      # measurement — the Windows PCOV builds crash on instrumented requires).
+      - name: Payment flow suite (mock gateway, PCOV)
+        run: php server/eligius-subscription/tests/integration/payment-flow-test-full.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Transfer security suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/transfer-security-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Trial eligibility suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/trial-eligibility-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Rate limiter suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/rate-limiter-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: REST endpoint coverage matrix (PCOV)
+        run: php server/eligius-subscription/tests/integration/endpoint-coverage-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Fail-closed policy suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/fail-closed-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: REST edge suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/rest-edges-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Payment concurrency suite (PCOV)
+        run: php server/eligius-subscription/tests/integration/payment-concurrency-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Aggregate backend coverage report
+        run: php server/eligius-subscription/tests/integration/cov-aggregate.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
+      - name: Upload backend coverage JSONs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            wp/wp-content/plugins/eligius-subscription/tests/integration/*.json
+            server/eligius-subscription/tests/integration/cov-aggregate.php
+            server/eligius-subscription/tests/integration/cov-runner.php
+
+  android:
+    name: Android unit tests + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v3
+      - name: JVM unit tests (models, SMS OTP extraction)
+        run: gradle testDebugUnitTest jacocoUnitTestReport --no-daemon --console=plain
+      - name: Assemble debug build
+        # The repo tracks app/libs/libbox.aar, so no Go toolchain/libbox build
+        # is needed here. Signing falls back to the debug key (H-1 limitation —
+        # NOT a release artifact).
+        run: gradle assembleDebug --no-daemon --console=plain
+      - name: Upload unit test reports + coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/jacoco/jacocoUnitTestReport/

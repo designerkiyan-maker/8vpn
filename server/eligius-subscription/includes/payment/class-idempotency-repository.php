@@ -22,7 +22,7 @@ class Class_Idempotency_Repository {
             $gateway_ref
         ));
         if ('' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
         return $row;
     }

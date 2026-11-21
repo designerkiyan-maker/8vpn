@@ -18,10 +18,10 @@
  *    violated (R1/R2/R7);
  *  • Trial+Paid licenses and their dates survive the swap (R4).
  */
-if (!defined('ABSPATH')) { define('ABSPATH', 'E:/xampp/htdocs/wp/'); }
+if (!defined('ABSPATH')) { define('ABSPATH', getenv('ELIGIUS_WP_ROOT') ?: 'E:/xampp/htdocs/wp/'); } // CI-portable root (P6)
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 $_SERVER['HTTP_USER_AGENT'] = 'eligius-test';
-require 'E:/xampp/htdocs/wp/wp-load.php';
+require ABSPATH . 'wp-load.php';
 
 $pass = 0; $fail = 0;
 function T($label, $cond) { global $pass, $fail; if ($cond) { $pass++; echo "PASS  $label\n"; } else { $fail++; echo "FAIL  $label\n"; } }
@@ -38,9 +38,18 @@ use Eligius_Sub\Core\Class_UTC_Time;
 $proc = Class_Device_Transfer::instance();
 $wpdb = $GLOBALS['wpdb'];
 
-// ---- Clean independent state -----------------------------------------------
+// ---- Clean independent state (fixture users created with EXPLICIT ids --
+// portable across fresh WordPress installs) --------------------------------
 // Resolve REAL user ids first (auto-increment ids are not 18/20/21), then
 // clean by the resolved ids so repeated runs start truly clean.
+function ensure_wp_user($wpdb, $id, $login) {
+    if ($wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->users} WHERE ID = %d", $id))) return;
+    $wpdb->query($wpdb->prepare(
+        "INSERT INTO {$wpdb->users} (ID, user_login, user_pass, user_email, user_registered)
+         VALUES (%d, %s, %s, %s, %s)",
+        $id, 'p6user' . $id, wp_hash_password('p6-pass-' . $id),
+        'p6user' . $id . '@example.invalid', gmdate('Y-m-d H:i:s')));
+}
 function find_or_create_user($wpdb, $login) {
     $id = (int) ($wpdb->get_var($wpdb->prepare("SELECT ID FROM wp_users WHERE user_login = %s", $login)) ?? 0);
     if (!$id) {
@@ -51,6 +60,10 @@ function find_or_create_user($wpdb, $login) {
     }
     return $id;
 }
+ensure_wp_user($wpdb, 17, 'p6-user17');
+ensure_wp_user($wpdb, 18, 'p5transfer-u18');
+ensure_wp_user($wpdb, 20, 'p5newdevice-u20');
+ensure_wp_user($wpdb, 21, 'p5react-u21');
 $u18 = find_or_create_user($wpdb, 'p5transfer-u18');
 $u20 = find_or_create_user($wpdb, 'p5newdevice-u20');
 $u21 = find_or_create_user($wpdb, 'p5react-u21');
@@ -61,6 +74,15 @@ $wpdb->query("DELETE FROM wp_eligius_devices        WHERE user_id IN (17, $u18, 
 $wpdb->query("DROP TRIGGER IF EXISTS p5_block_audit");
 $wpdb->query("DROP TRIGGER IF EXISTS p5_block_events");
 
+function clear_rl_table($wpdb, array $tuples) {
+    // Phase 6 M-3: limiter storage is the rate_limits TABLE — stale buckets
+    // from previous runs must be cleared there (transients are dead storage).
+    foreach ($tuples as $t) {
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->prefix}eligius_rate_limits WHERE bucket_id = %s",
+            md5($t[0] . '|' . $t[1] . '|' . $t[2])));
+    }
+}
 function otp_of($tid) {
     global $wpdb;
     return $wpdb->get_var($wpdb->prepare("SELECT otp_code FROM wp_eligius_device_transfers WHERE id = %d", $tid));
@@ -283,10 +305,11 @@ $wpdb->insert("wp_eligius_licenses", [
 
 // Rate-limit counters are per-window transients — clear them so repeated
 // acceptance runs do not trip caps (limiter behavior itself is NOT modified).
-delete_transient('eligius_sub_rl_' . md5('transfer_start_user|' . $u20 . '|86400'));
-delete_transient('eligius_sub_rl_' . md5('transfer_verify_user|' . $u20 . '|60'));
-delete_transient('eligius_sub_rl_' . md5('device_register_user|' . $u20 . '|3600'));
-delete_transient('eligius_sub_rl_' . md5('trial_user|' . $u20 . '|86400'));
+clear_rl_table($wpdb, array(
+    array('transfer_start_user', $u20, 86400), array('transfer_verify_user', $u20, 60),
+    array('device_register_user', $u20, 3600), array('trial_user', $u20, 86400),
+    array('device_register_user', $u21, 3600), array('global_ip', '127.0.0.1', 60),
+));
 
 function rest_post($route, $hash, array $params = []) {
     $req = new WP_REST_Request('POST', '/eligius/v1' . $route);
@@ -394,7 +417,7 @@ $wpdb->insert("wp_eligius_licenses", [
 // Admin releases the device (is_active=0 + license unbind) — as Class_Devices_Admin does.
 Class_Device_Repository::set_active($xRow->id, false);
 $wpdb->query("UPDATE wp_eligius_licenses SET device_id = NULL WHERE device_id = {$xRow->id}");
-delete_transient('eligius_sub_rl_' . md5('device_register_user|' . $u21 . '|3600'));
+
 $resRe = rest_post('/devices/register', $hashX, [
     'fingerprint' => $hashX,
     'public_key'  => "-----BEGIN PUBLIC KEY-----\nMIIBpk-x\n-----END PUBLIC KEY-----\n",

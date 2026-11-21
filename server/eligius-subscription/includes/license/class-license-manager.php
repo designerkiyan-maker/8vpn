@@ -182,12 +182,34 @@ class Class_License_Manager {
 
         $existing = Class_License_Repository::get_latest($user_id);
 
+        // Phase 6 fix (found by the endpoint-coverage suite): the renewal-extend
+        // guard below only fired when get_latest() happened to RETURN the
+        // ACTIVE same-plan row. A later-granted TRIAL row shadows it (get_latest
+        // = most recent), so "buy monthly → claim trial → buy monthly again"
+        // took the INSERT path → uniq_user_active_plan violation → the callback
+        // rolled back and retried FOREVER (paid money, stuck license — the exact
+        // Phase-4 requirement-9 failure mode). Scan for the active same-plan row
+        // EXPLICITLY; renewal-extend wins over conversion/insert.
+        $active_same_plan = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$wpdb->prefix}eligius_licenses
+              WHERE user_id = %d AND plan_key = %s AND status = 'ACTIVE' AND expires_at > %s
+              ORDER BY expires_at DESC, id DESC LIMIT 1",
+            (int) $user_id,
+            (string) $plan->plan_key,
+            Class_UTC_Time::mysql_utc()
+        ));
+        if ('' !== $wpdb->last_error) {
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
+        }
+
         // TRIAL → PAID conversion (doc 05 §3.1: "Payment during trial →
         // upgrades to paid, extend from trial expiry"): the paid license
         // starts when the trial would have ended; the trial row stays TRIAL
-        // and is expired later by the daily cron.
+        // and is expired later by the daily cron. Applies only when the same
+        // plan is NOT already active (renewal-extend above wins).
         $started_at = Class_UTC_Time::mysql_utc();
-        if ($existing
+        if (!$active_same_plan
+            && $existing
             && 'TRIAL' === $existing->status
             && !$plan->is_trial
             && $existing->expires_at > Class_UTC_Time::mysql_utc()
@@ -200,11 +222,8 @@ class Class_License_Manager {
         // violate uniq_user_active_plan and make the callback retry loop
         // permanently fail (Phase-4 requirement 9). Renewal extends
         // expires_at from the current expiry and reuses the row id.
-        if ($existing
-            && 'ACTIVE' === $existing->status
-            && $existing->plan_key === (string) $plan->plan_key
-            && $existing->expires_at > Class_UTC_Time::mysql_utc()
-        ) {
+        if ($active_same_plan) {
+            $existing = $active_same_plan;
             $new_expires = gmdate('Y-m-d H:i:s', strtotime("+{$plan->duration_days} days", strtotime($existing->expires_at)));
             $extended = $wpdb->query($wpdb->prepare(
                 "UPDATE {$wpdb->prefix}eligius_licenses
@@ -214,7 +233,7 @@ class Class_License_Manager {
                 (int) $existing->id
             ));
             if (false === $extended || '' !== $wpdb->last_error) {
-                return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'License renewal failed.', ['status' => 500]);
+                return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
             }
 
             $event = Class_Audit_Log_Repository::insert_license_event([
@@ -253,7 +272,7 @@ class Class_License_Manager {
 
         $license_id = Class_License_Repository::create($data);
         if (0 === $license_id || '' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'License insert failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // Terminal non-active statuses of the previous license are kept for
@@ -286,7 +305,7 @@ class Class_License_Manager {
 
         $updated = Class_License_Repository::update($license_id, ['status' => 'REVOKED']);
         if (false === $updated && '' !== $GLOBALS['wpdb']->last_error) {
-            return new \WP_Error('eligius_db_update_failed', $GLOBALS['wpdb']->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $GLOBALS['wpdb']->last_error), ['status' => 500]);
         }
 
         Class_Audit_Log_Repository::insert_license_event([
@@ -333,7 +352,7 @@ class Class_License_Manager {
             (int) $license_id
         ));
         if (false === $updated || '' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'Extend failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         Class_Audit_Log_Repository::insert_license_event([

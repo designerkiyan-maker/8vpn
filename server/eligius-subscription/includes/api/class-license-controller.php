@@ -107,7 +107,9 @@ class Class_License_Controller extends Class_Api_Controller {
             return self::fail_wp_error($device);
         }
 
-        $exceeded = self::rate_limit_or_fail(self::validation_buckets($device->device_hash));
+        // Read-only (Phase 6 final decision): may answer while the limiter is
+        // degraded — no side effect here.
+        $exceeded = self::rate_limit_or_fail(self::validation_buckets($device->device_hash), false);
         if (null !== $exceeded) {
             return $exceeded;
         }
@@ -122,7 +124,8 @@ class Class_License_Controller extends Class_Api_Controller {
             return self::fail_wp_error($device);
         }
 
-        $exceeded = self::rate_limit_or_fail(self::validation_buckets($device->device_hash));
+        // Read-only (Phase 6 final decision): may answer while degraded.
+        $exceeded = self::rate_limit_or_fail(self::validation_buckets($device->device_hash), false);
         if (null !== $exceeded) {
             return $exceeded;
         }

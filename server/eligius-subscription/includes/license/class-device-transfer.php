@@ -80,7 +80,7 @@ class Class_Device_Transfer {
             return new \WP_Error('eligius_transfer_pending', 'A transfer is already pending.', ['status' => 409]);
         }
         if ('' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         $otp     = sprintf('%06d', random_int(0, 999999));
@@ -96,7 +96,7 @@ class Class_Device_Transfer {
             'initiated_at'  => Class_UTC_Time::mysql_utc(),
         ]);
         if (false === $ok || '' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'Transfer insert failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
         $transfer_id = (int) $wpdb->insert_id;
 
@@ -195,7 +195,7 @@ class Class_Device_Transfer {
             // the client refreshes via /devices/register after activation.
             $new_id = Class_Device_Repository::create($user_id, $to_device_hash, '', '', 0, 'transfer');
             if (0 === $new_id || '' !== $wpdb->last_error) {
-                return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'Could not create target device row.', ['status' => 500]);
+                return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
             }
             $to_device = Class_Device_Repository::find_by_hash($user_id, $to_device_hash);
         } elseif ((int) $to_device->is_active) {
@@ -218,7 +218,7 @@ class Class_Device_Transfer {
             return new \WP_Error('eligius_transfer_pending', 'A transfer is already pending.', ['status' => 409]);
         }
         if ('' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         $otp       = sprintf('%06d', random_int(0, 999999));
@@ -235,7 +235,7 @@ class Class_Device_Transfer {
             'initiated_at'  => Class_UTC_Time::mysql_utc(),
         ]);
         if (false === $ok || '' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'Transfer insert failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
         $transfer_id = (int) $wpdb->insert_id;
 
@@ -375,20 +375,20 @@ class Class_Device_Transfer {
         );
         if (false === $updated || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'Transfer update failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // ---- STEP 3: swap device activation (old deauthorized immediately) -
         $ok = Class_Device_Repository::set_active((int) $transfer->from_device_id, false);
         if (false === $ok || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'Old-device deactivation failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         $ok = Class_Device_Repository::set_active((int) $transfer->to_device_id, true);
         if (false === $ok || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_update_failed', $wpdb->last_error ?: 'New-device activation failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_update_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // ---- STEP 4: move the license binding ------------------------------
@@ -403,7 +403,7 @@ class Class_Device_Transfer {
         ));
         if (false === $moved || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_bind_failed', $wpdb->last_error ?: 'License binding move failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_bind_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // ---- STEP 5: audit (an unaudited transfer must not commit) ---------
@@ -419,7 +419,7 @@ class Class_Device_Transfer {
         ));
         if ('' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         $event_ok = false;

@@ -9,10 +9,10 @@
  *    local cache emptiness.
  * State-independent (dedicated users, resolved by login before cleanup).
  */
-if (!defined('ABSPATH')) { define('ABSPATH', 'E:/xampp/htdocs/wp/'); }
+if (!defined('ABSPATH')) { define('ABSPATH', getenv('ELIGIUS_WP_ROOT') ?: 'E:/xampp/htdocs/wp/'); } // CI-portable root (P6)
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 $_SERVER['HTTP_USER_AGENT'] = 'eligius-trial-test';
-require 'E:/xampp/htdocs/wp/wp-load.php';
+require ABSPATH . 'wp-load.php';
 
 $pass = 0; $fail = 0;
 function T($label, $cond) { global $pass, $fail; if ($cond) { $pass++; echo "PASS  $label\n"; } else { $fail++; echo "FAIL  $label\n"; } }
@@ -40,6 +40,15 @@ $wpdb->query("DELETE FROM wp_eligius_device_transfers WHERE user_id IN ($u30, $u
 $wpdb->query("DELETE FROM wp_eligius_licenses       WHERE user_id IN ($u30, $u31)");
 $wpdb->query("DELETE FROM wp_eligius_devices        WHERE user_id IN ($u30, $u31)");
 
+function clear_rl_table($wpdb, array $tuples) {
+    // Phase 6 M-3: limiter storage is the rate_limits TABLE — stale buckets
+    // from previous runs must be cleared there (transients are dead storage).
+    foreach ($tuples as $t) {
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->prefix}eligius_rate_limits WHERE bucket_id = %s",
+            md5($t[0] . '|' . $t[1] . '|' . $t[2])));
+    }
+}
 function rest_req($method, $route, $hash, array $params = array()) {
     $req = new WP_REST_Request($method, '/eligius/v1' . $route);
     if (null !== $hash) $req->set_header('X-Device-Hash', $hash);
@@ -58,9 +67,10 @@ update_user_meta($u30, 'mobile', '09123330000');
 wp_set_current_user($u30);
 $hash30 = str_repeat('b', 60) . '0000';
 Class_Device_Repository::create($u30, $hash30, 'pk-u30', 'U30 Dev', 1, 'test');
-delete_transient('eligius_sub_rl_' . md5('trial_user|' . $u30 . '|86400'));
-delete_transient('eligius_sub_rl_' . md5('trial_ip|127.0.0.1|3600'));
-delete_transient('eligius_sub_rl_' . md5('validation_device|' . $hash30 . '|60'));
+clear_rl_table($wpdb, array(
+    array('trial_user', $u30, 86400), array('trial_ip', '127.0.0.1', 3600),
+    array('validation_device', $hash30, 60),
+));
 
 list($code1, $st1) = status_of($hash30);
 T('E1. fresh account, active device, no licenses: NO_ACTIVE_LICENSE',
@@ -98,7 +108,7 @@ $wpdb->insert("wp_eligius_licenses", array(
     'status' => 'ACTIVE', 'source' => 'payment', 'device_id' => (int) $old31->id,
     'created_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s'),
 ));
-delete_transient('eligius_sub_rl_' . md5('validation_device|' . $hashPend31 . '|60'));
+clear_rl_table($wpdb, array(array('validation_device', $hashPend31, 60)));
 
 list($code4, $st4) = status_of($hashPend31);
 T('E4. pending device: DEVICE_LIMIT_REACHED (transfer flow, never trial path)',

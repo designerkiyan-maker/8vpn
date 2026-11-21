@@ -69,17 +69,52 @@ object RetrofitClient {
             .build()
     }
 
-    private val retrofit: Retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(baseUrlOverride ?: BuildConfig.ELIGIUS_API_BASE)
-            .client(client)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-    }
+    // Phase 6: backing fields (not `by lazy`) so the TEST-ONLY rebuild below
+    // can drop instances when the base-url override changes mid-suite.
+    @Volatile private var retrofitInstance: Retrofit? = null
+    @Volatile private var licenseApiInstance: LicenseApiService? = null
+    @Volatile private var deviceApiInstance: DeviceApiService? = null
+    @Volatile private var paymentApiInstance: ir.mrkiyan.eligius.api.PaymentApiService? = null
 
-    val licenseApi: LicenseApiService by lazy { retrofit.create(LicenseApiService::class.java) }
-    val deviceApi: DeviceApiService by lazy { retrofit.create(DeviceApiService::class.java) }
-    val paymentApi: ir.mrkiyan.eligius.api.PaymentApiService by lazy { retrofit.create(ir.mrkiyan.eligius.api.PaymentApiService::class.java) }
+    private val retrofit: Retrofit
+        get() = retrofitInstance ?: synchronized(this) {
+            retrofitInstance ?: Retrofit.Builder()
+                .baseUrl(baseUrlOverride ?: BuildConfig.ELIGIUS_API_BASE)
+                .client(client)
+                .addConverterFactory(MoshiConverterFactory.create(moshi))
+                .build()
+                .also { retrofitInstance = it }
+        }
+
+    val licenseApi: LicenseApiService
+        get() = licenseApiInstance ?: synchronized(this) {
+            licenseApiInstance ?: retrofit.create(LicenseApiService::class.java)
+                .also { licenseApiInstance = it }
+        }
+    val deviceApi: DeviceApiService
+        get() = deviceApiInstance ?: synchronized(this) {
+            deviceApiInstance ?: retrofit.create(DeviceApiService::class.java)
+                .also { deviceApiInstance = it }
+        }
+    val paymentApi: ir.mrkiyan.eligius.api.PaymentApiService
+        get() = paymentApiInstance ?: synchronized(this) {
+            paymentApiInstance ?: retrofit.create(ir.mrkiyan.eligius.api.PaymentApiService::class.java)
+                .also { paymentApiInstance = it }
+        }
+
+    /**
+     * Phase 6: TEST-ONLY — drops the lazily built Retrofit and service
+     * instances so the next use rebuilds them with the CURRENT
+     * [baseUrlOverride] (the instrumented suite switches between the local
+     * backend and a closed port). Never called by any production flow.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun rebuildForTest() {
+        retrofitInstance = null
+        licenseApiInstance = null
+        deviceApiInstance = null
+        paymentApiInstance = null
+    }
 
     /** Extract the human-readable error from a failed envelope. */
     fun errorMessage(response: retrofit2.Response<out ApiResponse<*>>): String? {

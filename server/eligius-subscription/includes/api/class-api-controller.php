@@ -91,14 +91,17 @@ abstract class Class_Api_Controller {
         return Class_Auth_Integration::instance()->permission_user($request);
     }
 
-    /** Global per-IP limiter (doc 03 §9 — 1000/min/IP) + user auth. */
+    /** Global per-IP limiter (doc 03 §9 — 1000/min/IP) + user auth.
+     *  Phase 6 final decision: the global bucket does NOT fail-closed on
+     *  degraded — read-only endpoints may still answer; every side-effecting
+     *  route carries its own fail-closed bucket via rate_limit_or_fail(). */
     public static function permission_user_global(\WP_REST_Request $request) {
         $auth = Class_Auth_Integration::instance()->permission_user($request);
         if (is_wp_error($auth)) {
             return $auth;
         }
         $exceeded = Class_Rate_Limiter::instance()->hit('global_ip', (string) ($_SERVER['REMOTE_ADDR'] ?? '0'), 1000, 60);
-        if (!$exceeded['allowed']) {
+        if (empty($exceeded['degraded']) && !$exceeded['allowed']) {
             return Class_Rate_Limiter::instance()->too_many_error($exceeded);
         }
         return true;
@@ -116,14 +119,25 @@ abstract class Class_Api_Controller {
      * Convenience: consume the request's rate-limit buckets. Returns the 429
      * envelope error when a bucket is exceeded; otherwise stores the last
      * bucket result so dispatch_rate_headers() can attach the headers.
+     *
+     * Phase 6 — Final Security Decision (owner, selective fail-closed): when
+     * the Rate Limiter is DEGRADED (its store is unavailable), sensitive
+     * operations MUST stop BEFORE any side effect with a typed
+     * 503 RATE_LIMIT_UNAVAILABLE — no fail-open fallback. Read-only routes
+     * (plan list, payment status/history, license validate) opt out by
+     * passing $fail_closed_on_degraded = false: with a healthy database they
+     * may still answer while the limiter is degraded.
      */
-    protected static function rate_limit_or_fail(array $buckets) {
+    protected static function rate_limit_or_fail(array $buckets, bool $fail_closed_on_degraded = true) {
         $outcome = Class_Rate_Limiter::instance()->hit_all($buckets);
         if (null !== $outcome['exceeded']) {
             return self::fail('TOO_MANY_REQUESTS', 'Rate limit exceeded.', 429, [
                 'limit' => $outcome['exceeded']['limit'],
                 'reset' => $outcome['exceeded']['reset'],
             ]);
+        }
+        if ($fail_closed_on_degraded && !empty($outcome['last']['degraded'])) {
+            return self::fail('RATE_LIMIT_UNAVAILABLE', 'Rate limiter is temporarily unavailable; the request was not processed. Please retry shortly.', 503);
         }
         self::$rate_headers = $outcome['last'];
         return null;

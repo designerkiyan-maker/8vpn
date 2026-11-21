@@ -127,7 +127,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         $existing = Class_Device_Repository::find_by_hash($user_id, $device_hash);
         if ('' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
+            return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), 500);
         }
         if ($existing) {
             // Phase 5: blocked device cannot re-register (backend-enforced).
@@ -162,7 +162,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             $slot_active_id = (int) Class_Device_Repository::find_active_id($user_id);
             if ('' !== $wpdb->last_error) {
                 $wpdb->query('ROLLBACK');
-                return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
+                return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), 500);
             }
             $upd = $wpdb->query($wpdb->prepare(
                 "UPDATE {$wpdb->prefix}eligius_devices
@@ -174,7 +174,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             ));
             if (false === $upd || '' !== $wpdb->last_error) {
                 $wpdb->query('ROLLBACK');
-                return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device key refresh failed.', 500);
+                return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error ?: 'Device key refresh failed.'), 500);
             }
 
             if (0 === $slot_active_id) {
@@ -184,7 +184,7 @@ class Class_Device_Controller extends Class_Api_Controller {
                 ));
                 if (false === $upd || '' !== $wpdb->last_error) {
                     $wpdb->query('ROLLBACK');
-                    return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device reactivation failed.', 500);
+                    return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error ?: 'Device reactivation failed.'), 500);
                 }
                 $bind_err = self::bind_licenses_and_audit($user_id, (int) $existing->id);
                 if (null !== $bind_err) {
@@ -229,7 +229,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         $active_id = Class_Device_Repository::find_active_id($user_id);
         if ('' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return self::fail('INTERNAL_ERROR', $wpdb->last_error, 500);
+            return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), 500);
         }
         if ($active_id > 0) {
             // Phase 5b (owner decision): a BRAND-NEW device on an account
@@ -242,7 +242,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             $device_id = Class_Device_Repository::create($user_id, $device_hash, $public_key, $label, 0, 'app');
             if (0 === $device_id || '' !== $wpdb->last_error) {
                 $wpdb->query('ROLLBACK');
-                return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device insert failed.', 500);
+                return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error ?: 'Device insert failed.'), 500);
             }
             // NO license binding — the active device keeps its licenses;
             // they move atomically in transfer verify only.
@@ -273,7 +273,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         $device_id = Class_Device_Repository::create($user_id, $device_hash, $public_key, $label, 1, 'app');
         if (0 === $device_id || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return self::fail('INTERNAL_ERROR', $wpdb->last_error ?: 'Device insert failed.', 500);
+            return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error ?: 'Device insert failed.'), 500);
         }
 
         // Steps 4-5: bind ACTIVE/TRIAL licenses + audited bind (doc 02 §2.8.3).
@@ -313,7 +313,7 @@ class Class_Device_Controller extends Class_Api_Controller {
         ));
         if (false === $bound || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_internal_error', $wpdb->last_error ?: 'License bind failed.', ['status' => 500]);
+            return new \WP_Error('eligius_internal_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // Step 5: audit row — an unaudited bind must not commit (doc 02 §2.8.3).
@@ -332,7 +332,7 @@ class Class_Device_Controller extends Class_Api_Controller {
             ));
             if ('' !== $wpdb->last_error) {
                 $wpdb->query('ROLLBACK');
-                return new \WP_Error('eligius_internal_error', $wpdb->last_error, ['status' => 500]);
+                return new \WP_Error('eligius_internal_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
             }
             if ($bound_license_id > 0) {
                 $event = Class_Audit_Log_Repository::insert_license_event([
@@ -431,7 +431,7 @@ class Class_Device_Controller extends Class_Api_Controller {
 
         $devices = Class_Device_Repository::list_for_user(get_current_user_id());
         if (null === $devices && '' !== $GLOBALS['wpdb']->last_error) {
-            return self::fail('INTERNAL_ERROR', $GLOBALS['wpdb']->last_error, 500);
+            return self::fail('INTERNAL_ERROR', \Eligius_Sub\Core\Class_DB_Error::message('db', $GLOBALS['wpdb']->last_error), 500);
         }
 
         $active_id = Class_Device_Repository::find_active_id(get_current_user_id());

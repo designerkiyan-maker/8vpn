@@ -57,6 +57,18 @@ class Class_Payment_Controller extends Class_Api_Controller {
             'callback'            => [$this, 'route_callback'],
             'permission_callback' => '__return_true',
         ]);
+
+        // Phase 6 — Payment Reconciliation (owner final decision): an
+        // AUTHENTICATED user-initiated re-verification for INITIATED payments
+        // whose callback never landed. Authority + amount come ONLY from the
+        // stored payment row (never from the client); the S2S verification,
+        // FOR UPDATE locking and idempotency live in the processor. Fails
+        // closed with 503 when the rate limiter is degraded.
+        register_rest_route(self::NAMESPACE_V1, '/payments/(?P<payment_id>\d+)/reconcile', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'route_reconcile'],
+            'permission_callback' => [self::class, 'permission_user_global'],
+        ]);
     }
 
     /** POST /payments/create (docs 03 §6.1). */
@@ -166,6 +178,37 @@ class Class_Payment_Controller extends Class_Api_Controller {
     public function route_callback(\WP_REST_Request $request) {
         $gateway = sanitize_key((string) $request['gateway']);
 
+        // Phase 6 M-2 + Final Security Decision: rate limit BEFORE any
+        // expensive verification / DB work. The callback is a BROWSER redirect
+        // of the payer (not a gateway S2S call), so the IP bucket stays
+        // generous — payers behind shared IPs (CGNAT) must never be
+        // collectively blocked; a normal payment produces 1–3 callback hits.
+        // The AUTHORITY bucket is the precise anti-amplification control.
+        // REMOTE_ADDR is used deliberately — client-supplied X-Forwarded-For
+        // is NOT trusted (no trusted proxy configured in this deployment).
+        //
+        // BOTH throttle outcomes keep the deep-link contract with
+        // status=pending (NOT failed): the payment may still complete through
+        // another callback or the user-initiated reconcile endpoint, and the
+        // app polls the authoritative status afterwards. Retry-After is sent
+        // in both cases. NO S2S verification and NO database change happen on
+        // either path.
+        $authority = (string) ($request['authority'] ?? $request['Authority'] ?? '');
+        $outcome = Class_Rate_Limiter::instance()->hit_all(array(
+            array('payment_callback_ip', (string) ($_SERVER['REMOTE_ADDR'] ?? '0'), 60, 300),
+            array('payment_callback_authority', '' !== $authority ? $authority : 'none', 20, 600),
+        ));
+        if (null !== $outcome['exceeded']) {
+            // Limit consumed → 429-equivalent: throttled, retry later.
+            return $this->callback_throttled_redirect('rate_limited', max(1, (int) $outcome['exceeded']['reset'] - time()));
+        }
+        if (!empty($outcome['last']['degraded'])) {
+            // Rate limiter store unavailable → fail-closed: no S2S, no DB
+            // touch; the payment stays INITIATED and remains reconcilable.
+            \Eligius_Sub\Core\Class_DB_Error::log('payment-callback.degraded', $GLOBALS['wpdb']->last_error ?: 'rate limiter store unavailable');
+            return $this->callback_throttled_redirect('rate_limit_unavailable', 60);
+        }
+
         $result = Class_Payment_Processor::instance()->handle_callback(
             $gateway,
             $request->get_query_params()
@@ -188,6 +231,96 @@ class Class_Payment_Controller extends Class_Api_Controller {
         $response = rest_ensure_response('');
         $response->set_status(302);
         $response->header('Location', $deepLink);
+        return $response;
+    }
+
+    /**
+     * Phase 6 — POST /payments/{id}/reconcile: safe user-initiated
+     * re-verification of an INITIATED payment.
+     *
+     * Security contract (owner requirements):
+     *  - authenticated + OWNERSHIP (payment row must belong to the caller);
+     *  - authority comes ONLY from the stored database row — client-supplied
+     *    authority/amount is never trusted;
+     *  - the whole flow reuses the processor's S2S verification, amount
+     *    check, codes 100/101, FOR UPDATE locking and idempotency;
+     *  - terminal states (VERIFIED/FAILED) return the current state without
+     *    any gateway traffic (idempotent, no duplicate side effects);
+     *  - fail-closed on a degraded rate limiter: 503 RATE_LIMIT_UNAVAILABLE
+     *    BEFORE any S2S call or DB change; the payment stays retryable.
+     */
+    public function route_reconcile(\WP_REST_Request $request) {
+        global $wpdb;
+        $auth = \Eligius_Sub\Auth\Class_Auth_Integration::instance()->permission_user($request);
+        if (is_wp_error($auth)) {
+            return self::fail_wp_error($auth);
+        }
+
+        // Dedicated reconciliation limit (owner: "Rate Limit مستقل و مناسب")
+        // — 5/hour/user, fail-closed on degraded (default).
+        $exceeded = self::rate_limit_or_fail([
+            ['payment_reconcile_user', (string) get_current_user_id(), 5, 3600],
+        ]);
+        if (null !== $exceeded) {
+            return $exceeded;
+        }
+
+        $payment_id = (int) $request['payment_id'];
+        $payment = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, gateway, gateway_ref, authority, amount, status, plan_key, license_id
+              FROM {$wpdb->prefix}eligius_payments WHERE id = %d AND user_id = %d",
+            $payment_id,
+            get_current_user_id()
+        ));
+        if (!$payment) {
+            return self::fail('NOT_FOUND', 'Payment not found.', 404);
+        }
+
+        if ('VERIFIED' === $payment->status || 'FAILED' === $payment->status || 'REFUNDED' === $payment->status) {
+            // Terminal state — no gateway traffic, just the authoritative
+            // current status (idempotent reconciliation).
+            return self::ok([
+                'payment_id' => (int) $payment->id,
+                'status'     => (string) $payment->status,
+                'duplicate'  => true,
+                'license_id' => $payment->license_id ? (int) $payment->license_id : null,
+            ]);
+        }
+
+        if ('INITIATED' !== $payment->status) {
+            return self::fail('RECONCILE_NOT_ALLOWED', 'Payment is not in a reconcilable state.', 422);
+        }
+
+        // S2S re-verification with the STORED authority only (the processor
+        // takes the amount from the same row; codes 100/101 handled there).
+        $result = Class_Payment_Processor::instance()->handle_callback(
+            (string) $payment->gateway,
+            array('authority' => (string) $payment->authority, 'Status' => 'OK')
+        );
+        if (is_wp_error($result)) {
+            return self::fail_wp_error($result);
+        }
+
+        return self::ok([
+            'payment_id' => (int) $result['payment_id'],
+            'status'     => (string) $result['status'],
+            'duplicate'  => (bool) $result['duplicate'],
+            'license_id' => $result['license_id'],
+        ]);
+    }
+
+    /**
+     * Phase 6 final decision: throttled/degraded callback answer. The
+     * deep-link contract is preserved (302) but the STATUS is `pending` —
+     * not `failed`: the payment may still complete via another callback or
+     * the user-initiated reconcile endpoint. Retry-After guides the retry.
+     * Neither path touches the database or the gateway.
+     */
+    private function callback_throttled_redirect(string $reason, int $retry_after_seconds) {
+        $response = rest_ensure_response('');
+        $response->set_status(302);
+        $response->header('Location', 'eligius://payment/result?status=pending&payment_id=0&reason=' . rawurlencode($reason));
+        $response->header('Retry-After', (string) max(1, $retry_after_seconds));
         return $response;
     }
 }

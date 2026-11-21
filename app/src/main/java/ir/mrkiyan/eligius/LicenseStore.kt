@@ -129,6 +129,13 @@ object LicenseStore {
         }
 
         // 4. Offline entitlement (72h max) — gated by TimeIntegrity (STRICT).
+        //    Phase 6 final closure (owner: "Recovery پس از رفع خطا"): a
+        //    TimeIntegrity DENIAL (Expired/Tampered) denies the OFFLINE path
+        //    but must NOT block the ONLINE path — docs 04 §4.4 states
+        //    "offline DENIED, online validation REQUIRED". The denial reason
+        //    surfaces only when the online validation ALSO fails; a successful
+        //    online validation re-anchors the budget (full recovery).
+        var timeIntegrityDenial: String? = null
         val offline = offlineStore!!.get()
         if (offline != null) {
             when (val t = TimeIntegrity.check(ctx)) {
@@ -160,14 +167,19 @@ object LicenseStore {
                     // Invalid/expired blob → fall through to online validation.
                 }
                 is TimeIntegrity.Result.Expired ->
-                    return ValidationResult(false, "OFFLINE_GRACE_EXPIRED")
+                    timeIntegrityDenial = "OFFLINE_GRACE_EXPIRED"
                 is TimeIntegrity.Result.Tampered ->
-                    return ValidationResult(false, "TIME_TAMPERING: ${t.reason}")
+                    timeIntegrityDenial = "TIME_TAMPERING: ${t.reason}"
             }
         }
 
-        // 5. Online validation (server-authoritative).
-        return onlineValidation(ctx)
+        // 5. Online validation (server-authoritative) — always attempted when
+        //    the offline path did not grant. On failure, the TimeIntegrity
+        //    denial (when present) is the more specific error surfaced to the
+        //    user; a successful online validation re-anchors everything.
+        val online = onlineValidation(ctx)
+        if (online.isValid || timeIntegrityDenial == null) return online
+        return ValidationResult(false, timeIntegrityDenial)
     }
 
     private suspend fun onlineValidation(ctx: Context): ValidationResult {

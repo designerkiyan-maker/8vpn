@@ -49,6 +49,7 @@ class PaymentActivity : ComponentActivity() {
 
     private var paymentId by mutableStateOf(0L)
     private var status by mutableStateOf("PENDING")
+    private var reconcileBusy by mutableStateOf(false)
     private var planKey by mutableStateOf("")
     private var polling by mutableStateOf(true)
     private var loadedFromBackend by mutableStateOf(false)
@@ -162,6 +163,40 @@ class PaymentActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall,
                             color = c.onSurfaceVariant
                         )
+                    }
+                    // Phase 6 — Payment Reconciliation: once the automatic
+                    // polling window is exhausted, the user can explicitly ask
+                    // the server to re-run the S2S verification (server uses
+                    // the STORED authority; fail-closed 503 when the rate
+                    // limiter is degraded). Simple status polling never
+                    // triggers S2S calls.
+                    if (!polling) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "اگر پرداخت انجام شده و وضعیت به‌روز نشده، بررسی مجدد سرور را اجرا کنید.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = c.onSurfaceVariant
+                        )
+                        Button(
+                            onClick = {
+                                reconcileBusy = true
+                                lifecycleScope.launch {
+                                    runCatching {
+                                        val response = RetrofitClient.paymentApi.reconcilePayment(paymentId)
+                                        val data = response.body()?.data
+                                        if (response.isSuccessful && data != null) {
+                                            when (data.status) {
+                                                "VERIFIED" -> { status = "VERIFIED"; reconcileBusy = false; onLicenseRefresh(data.licenseId); return@launch }
+                                                "FAILED" -> { status = "FAILED"; reconcileBusy = false; return@launch }
+                                            }
+                                        }
+                                    }.onFailure { /* network error — stay pending, retryable */ }
+                                    reconcileBusy = false
+                                }
+                            },
+                            modifier = Modifier.padding(top = 8.dp),
+                            enabled = !reconcileBusy
+                        ) { Text(if (reconcileBusy) "در حال بررسی…" else "بررسی مجدد پرداخت") }
                     }
                     Button(onClick = { finish() }, Modifier.padding(top = 16.dp)) { Text("بستن") }
                 }

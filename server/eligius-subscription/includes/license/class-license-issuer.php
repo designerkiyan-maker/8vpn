@@ -146,6 +146,10 @@ class Class_License_Issuer {
             if (false !== $raw && 64 === strlen($raw)) {
                 $this->private_key  = $raw;
                 $this->key_is_fallback = true;
+                // Phase 6 (matrix finding): re-derive the public key option if
+                // it was lost — otherwise verify_entitlement fails with an
+                // unknown kid until manual repair. Idempotent.
+                $this->ensure_public_key_stored($raw);
                 return;
             }
         }

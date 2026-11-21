@@ -66,7 +66,7 @@ class Class_Trial_Manager {
         }
         if ('' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // DETERRENCE: same device_hash with a trial on ANOTHER account → flag
@@ -81,7 +81,7 @@ class Class_Trial_Manager {
         ));
         if ('' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_error', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
         if ($other_trial) {
             Class_Audit_Log_Repository::insert_audit([
@@ -112,7 +112,7 @@ class Class_Trial_Manager {
         ]);
         if (0 === $license_id || '' !== $wpdb->last_error) {
             $wpdb->query('ROLLBACK');
-            return new \WP_Error('eligius_db_insert_failed', $wpdb->last_error ?: 'Trial license insert failed.', ['status' => 500]);
+            return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
 
         // Lifecycle event — an unaudited grant must not commit (doc 02 §2.8.3 step 5).

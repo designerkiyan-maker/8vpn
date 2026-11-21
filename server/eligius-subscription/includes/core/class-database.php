@@ -28,6 +28,7 @@ class Class_Database {
         'eligius_device_transfers',
         'eligius_payment_idempotency',
         'eligius_audit_logs',
+        'eligius_rate_limits', // Phase 6 M-3: atomic rate-limit counters (no FKs — ephemeral rows)
     ];
 
     /**
@@ -126,11 +127,12 @@ class Class_Database {
             $table
         ));
         if ('' !== $wpdb->last_error) {
-            return new \WP_Error('eligius_db_engine_check_failed', $wpdb->last_error, ['status' => 500]);
+            return new \WP_Error('eligius_db_engine_check_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
         }
         if (null === $engine) {
             // wp_users missing is impossible; an eligius_* table here means CREATE failed above.
-            return new \WP_Error('eligius_db_table_missing', "Table {$table} does not exist.", ['status' => 500]);
+            Class_DB_Error::log('database.table_missing', 'Table ' . $table . ' does not exist.');
+            return new \WP_Error('eligius_db_table_missing', Class_DB_Error::CLIENT_MESSAGE, ['status' => 500]);
         }
         if ('InnoDB' === $engine) {
             return true;
@@ -139,13 +141,12 @@ class Class_Database {
         // Conversion attempt (doc 02 §2.8.2: ALTER TABLE … ENGINE=InnoDB).
         $wpdb->query("ALTER TABLE `{$table}` ENGINE=InnoDB");
         if ('' !== $wpdb->last_error) {
+            // Phase 6 M-1: the table/engine detail is logged server-side only;
+            // the client (activation screen) receives the generic message.
+            Class_DB_Error::log('database.innodb_convert', 'Table ' . $table . ' (' . $engine . ') could not be converted to InnoDB. Row locking requires InnoDB (doc 02 §2.8.2). ' . $wpdb->last_error);
             return new \WP_Error(
                 'eligius_db_not_innodb',
-                sprintf(
-                    'Table %1$s uses %2$s and could not be converted to InnoDB. Row locking requires InnoDB (doc 02 §2.8.2).',
-                    $table,
-                    $engine
-                ),
+                Class_DB_Error::CLIENT_MESSAGE,
                 ['status' => 500]
             );
         }
@@ -351,6 +352,23 @@ class Class_Database {
                     CONSTRAINT `fk_au_user` FOREIGN KEY (`user_id`) REFERENCES `{$users}`(`ID`) ON DELETE SET NULL,
                     CONSTRAINT `fk_au_device` FOREIGN KEY (`device_id`) REFERENCES `{$p}eligius_devices`(`id`) ON DELETE SET NULL,
                     CONSTRAINT `fk_au_license` FOREIGN KEY (`license_id`) REFERENCES `{$p}eligius_licenses`(`id`) ON DELETE SET NULL
+                ){$tail}";
+
+            case 'eligius_rate_limits':
+                // Phase 6 M-3: atomic fixed-window rate-limit counters. Rows
+                // are ephemeral (purged >24h after window end, no FKs — the
+                // bucket key may be a user id, an IP, a device hash or a
+                // payment authority). window_end is epoch seconds (UTC-based).
+                return "CREATE TABLE IF NOT EXISTS `{$p}eligius_rate_limits` (
+                    `bucket_id` CHAR(32) NOT NULL,
+                    `scope` VARCHAR(64) NOT NULL,
+                    `bucket_key` VARCHAR(191) NOT NULL,
+                    `window_end` BIGINT UNSIGNED NOT NULL,
+                    `count` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+                    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`bucket_id`),
+                    KEY `idx_rl_scope_key` (`scope`, `bucket_key`),
+                    KEY `idx_rl_window_end` (`window_end`)
                 ){$tail}";
         }
 

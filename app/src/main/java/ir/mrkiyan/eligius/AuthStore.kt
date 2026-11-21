@@ -55,6 +55,17 @@ object AuthStore {
 
     /** Current JWT for API layers (null = no token session). */
     fun sessionToken(): String? = flow.value?.token
+
+    /**
+     * Phase 6: TEST-ONLY session restore — lets the instrumented suite drive
+     * ensureValid() with a real JWT (fetched from the test backend) without
+     * driving the login UI. Never called by any production flow.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun restoreSessionForTest(user: String, token: String, exp: Long) {
+        flow.value = Session(user, user, "", token, exp)
+    }
+
     val profile = MutableStateFlow<Profile?>(null)
     val usageServer = MutableStateFlow<UsageServer?>(null)
     val isLoggedIn: Boolean get() = flow.value != null
