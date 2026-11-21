@@ -25,10 +25,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // P8.4 (H-1): NO debug fallback. When the release signing config is
-            // absent, the task-graph guard below fails the build loudly — an
-            // unsigned or debug-signed release APK can never be produced.
-            signingConfig = signingConfigs.findByName("release")
+            // P8.4 (H-1): NO debug fallback. The signingConfig is assigned
+            // AFTER the signingConfigs block below (P8.7.2: eager evaluation
+            // here ran BEFORE the config existed → silent unsigned APKs).
         }
     }
 
@@ -178,15 +177,21 @@ android {
         val wantsRelease = allTasks.any {
             it.name == "assembleRelease" || it.name == "bundleRelease" || it.name == "packageRelease"
         }
-        if (wantsRelease && releaseSigningError != null) {
-            // Include the triggering tasks — makes any false positive of the
-            // matcher immediately diagnosable.
+        if (wantsRelease && (releaseSigningError != null
+                || buildTypes.getByName("release").signingConfig == null)) {
+            // P8.7.2 belt-and-braces: ALSO fail when the release buildType has
+            // NO signingConfig at all (the silent-unsigned defect found in the
+            // first official build — eager assignment ordering).
             val triggered = allTasks.filter {
                 it.name == "assembleRelease" || it.name == "bundleRelease" || it.name == "packageRelease"
             }.map { it.name }.toSortedSet().joinToString(", ")
             throw GradleException("RELEASE SIGNING ERROR: $releaseSigningError (triggering task(s): $triggered)")
         }
     }
+    // P8.7.2: assign the signing config AFTER the signingConfigs block — the
+    // previous eager assignment (inside buildTypes, evaluated BEFORE this
+    // block) captured null and silently produced UNSIGNED release APKs.
+    buildTypes.getByName("release").signingConfig = signingConfigs.findByName("release")
 
     // Three outputs: armeabi-v7a, arm64-v8a and a universal APK (v7a + v8a + x86_64).
     splits {
