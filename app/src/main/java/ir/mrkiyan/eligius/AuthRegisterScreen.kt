@@ -79,7 +79,6 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     var lastName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var mobile by remember { mutableStateOf("") }
-    var nationalCode by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var showPass by remember { mutableStateOf(false) }
@@ -94,7 +93,6 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
     val passwordsMismatchMsg = stringResource(R.string.passwords_mismatch)
     val passwordTooShortMsg = stringResource(R.string.password_too_short)
     val invalidMobileMsg = stringResource(R.string.invalid_mobile)
-    val invalidNationalCodeMsg = stringResource(R.string.invalid_national_code)
     val invalidEmailMsg = stringResource(R.string.invalid_email)
     val registerErrorMsg = stringResource(R.string.register_error)
     val otpErrorMsg = stringResource(R.string.otp_error)
@@ -157,13 +155,6 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         singleLine = true, enabled = !busy,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    OutlinedTextField(
-                        value = nationalCode, onValueChange = { nationalCode = it },
-                        label = { Text(stringResource(R.string.national_code)) },
-                        singleLine = true, enabled = !busy,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
                     error?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
@@ -171,8 +162,6 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                         onClick = {
                             if (firstName.isBlank() || lastName.isBlank()) {
                                 error = fillAllFieldsMsg
-                            } else if (nationalCode.length != 10 || !nationalCode.all { it.isDigit() }) {
-                                error = invalidNationalCodeMsg
                             } else {
                                 error = null
                                 step = 2
@@ -259,7 +248,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                             error = null
                             busy = true
                             scope.launch {
-                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode, smsHash).fold(
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), smsHash).fold(
                                     onSuccess = {
                                         busy = false
                                         otp = ""
@@ -344,7 +333,7 @@ fun AuthRegisterScreen(onBack: () -> Unit, onLogin: () -> Unit) {
                             if (busy || resendIn > 0) return@TextButton
                             busy = true; error = null
                             scope.launch {
-                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), nationalCode, smsHash).fold(
+                                AuthStore.registerOtpStart(mobile.trim(), email.trim(), password, firstName.trim(), lastName.trim(), smsHash).fold(
                                     onSuccess = { resendIn = 60 },
                                     onFailure = { e ->
                                         error = (e as? AuthException)?.uiMessage ?: otpErrorMsg

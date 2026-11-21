@@ -80,7 +80,6 @@ All responses follow this envelope:
   "password": "SecurePass123",
   "first_name": "Ali",
   "last_name": "Rezaei",
-  "national_code": "1234567890",
   "hash": "fUIdyUNivXt"
 }
 ```
@@ -98,11 +97,11 @@ All responses follow this envelope:
 ```
 
 **Errors:**
-- `VALIDATION_ERROR` (400) — Invalid mobile, email, national code, weak password
-- `CONFLICT` (409) — Mobile/email/national_code already registered
+- `VALIDATION_ERROR` (400) — Invalid mobile, email, weak password (national code — only when a legacy client still sends it — is checksum-validated)
+- `CONFLICT` (409) — Mobile/email already registered; national_code duplicates are rejected only for legacy clients that still send it
 - `TOO_MANY_REQUESTS` (429) — Rate limit exceeded
 
-> **Note (TD-10):** `national_code` is currently required by the **live** endpoint (`server/eligius-otp.php`). Per the owner's no-unnecessary-identity-data decision, this field becomes **optional/removed** during implementation (a code change to the live endpoint — see 09-FINAL-DESIGN-REPORT.md). The Android client must not depend on it.
+> **Note (TD-10 — RESOLVED 2026-11-21):** `national_code` is now **OPTIONAL** on the live endpoint: the Android app no longer collects or sends it, and when it is absent no `national_code` usermeta is written. Legacy clients that still send it get the same checksum validation and duplicate rejection as before (backward compatible). No migration and no change to existing users.
 
 ---
 

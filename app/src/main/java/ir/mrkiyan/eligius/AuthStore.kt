@@ -199,14 +199,15 @@ object AuthStore {
 
     /** Step 1 of the OTP registration: validates everything server-side, creates
      *  the account (username = mobile) and sends a 6-digit code via SMS.
-     *  [hash] = the SMS-Retriever signature hash so the SMS can be auto-read. */
+     *  [hash] = the SMS-Retriever signature hash so the SMS can be auto-read.
+     *  TD-10 (owner decision, CD-6): NO identity data beyond the essential
+     *  fields — national_code is no longer collected or sent. */
     suspend fun registerOtpStart(
         mobile: String,
         email: String,
         password: String,
         firstName: String,
         lastName: String,
-        nationalCode: String,
         hash: String? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -216,7 +217,6 @@ object AuthStore {
                 .put("password", password)
                 .put("first_name", firstName)
                 .put("last_name", lastName)
-                .put("national_code", nationalCode)
                 .apply { if (!hash.isNullOrEmpty()) put("hash", hash) }
                 .apply {
                     // Phase 2 (CD-10): announce the Keystore device identity with the

@@ -122,6 +122,16 @@ jobs:
         env:
           ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
           P6_PHP_BIN: /usr/bin/php
+      # TD-10 (Phase 8.2): the LIVE OTP registration plugin is loaded directly
+      # from the repo by the suite itself (routes registered in-process) and
+      # its IPPanel HTTP call is intercepted via pre_http_request — NO real
+      # SMS is sent and NO real credentials exist (fake TEST constants are
+      # defined inside the suite before the plugin loads).
+      - name: OTP registration suite (TD-10, PCOV)
+        run: php server/eligius-subscription/tests/integration/otp-registration-test.php
+        env:
+          ELIGIUS_WP_ROOT: ${{ github.workspace }}/wp/
+          P6_PHP_BIN: /usr/bin/php
       - name: Payment concurrency suite (PCOV)
         run: php server/eligius-subscription/tests/integration/payment-concurrency-test.php
         env:

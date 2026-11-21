@@ -175,7 +175,7 @@ add_action( 'rest_api_init', function () {
 			'password'      => array( 'required' => true,  'type' => 'string' ),
 			'first_name'    => array( 'required' => true,  'type' => 'string' ),
 			'last_name'     => array( 'required' => true,  'type' => 'string' ),
-			'national_code' => array( 'required' => true,  'type' => 'string' ),
+			'national_code' => array( 'required' => false, 'type' => 'string' ),  // TD-10 (CD-6): optional
 			'hash'          => array( 'required' => false, 'type' => 'string' ),
 		),
 	) );
@@ -269,16 +269,22 @@ function eligius_otp_start_handler( WP_REST_Request $req ) {
 	if ( strlen( $password ) < 8 ) {
 		return new WP_Error( 'eligius_weak_password', 'Password must be at least 8 characters. / رمز عبور باید حداقل ۸ کاراکتر باشد.', array( 'status' => 400 ) );
 	}
-	if ( ! eligius_otp_valid_national_code( $national_code ) ) {
-		return new WP_Error( 'eligius_bad_national_code', 'Invalid national code. / کد ملی نامعتبر است.', array( 'status' => 400 ) );
-	}
-	global $wpdb;
-	$nc_owner = $wpdb->get_var( $wpdb->prepare(
-		"SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = 'national_code' AND meta_value = %s LIMIT 1",
-		$national_code
-	) );
-	if ( $nc_owner && (int) $nc_owner !== (int) $existing_id ) {
-		return new WP_Error( 'eligius_nc_exists', 'This national code is already registered. / این کد ملی قبلاً ثبت شده است.', array( 'status' => 400 ) );
+	/* TD-10 (CD-6, owner decision): the national code is OPTIONAL — validate
+	 * and duplicate-check ONLY when a legacy client still sends it. When the
+	 * field is absent, no identity data is collected and no usermeta is
+	 * written. Existing users' stored values are never touched. */
+	if ( '' !== $national_code ) {
+		if ( ! eligius_otp_valid_national_code( $national_code ) ) {
+			return new WP_Error( 'eligius_bad_national_code', 'Invalid national code. / کد ملی نامعتبر است.', array( 'status' => 400 ) );
+		}
+		global $wpdb;
+		$nc_owner = $wpdb->get_var( $wpdb->prepare(
+			"SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = 'national_code' AND meta_value = %s LIMIT 1",
+			$national_code
+		) );
+		if ( $nc_owner && (int) $nc_owner !== (int) $existing_id ) {
+			return new WP_Error( 'eligius_nc_exists', 'This national code is already registered. / این کد ملی قبلاً ثبت شده است.', array( 'status' => 400 ) );
+		}
 	}
 
 	if ( $created ) {
@@ -313,7 +319,9 @@ function eligius_otp_start_handler( WP_REST_Request $req ) {
 	// Standard WP fields + compatibility meta for site plugins:
 	update_user_meta( $user_id, 'mobile', $mobile );            // our canonical key
 	update_user_meta( $user_id, 'billing_phone', $mobile );     // WooCommerce convention
-	update_user_meta( $user_id, 'national_code', $national_code );
+	if ( '' !== $national_code ) {                              // TD-10: store ONLY when provided
+		update_user_meta( $user_id, 'national_code', $national_code );
+	}
 	update_user_meta( $user_id, 'registered_via', 'eligius-app' );
 
 	$otp = (string) random_int( 100000, 999999 );
