@@ -117,13 +117,13 @@ class Class_Devices_Admin {
 
     public static function render_all() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
 
         $msg = isset($_GET['eligius_device_msg']) ? sanitize_text_field(wp_unslash($_GET['eligius_device_msg'])) : '';
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Devices', 'eligius-subscription'); ?></h1>
+            <h1><?php esc_html_e('دستگاه‌ها', 'eligius-subscription'); ?></h1>
             <?php if ('' !== $msg) : ?>
                 <div class="notice notice-info"><p><?php echo esc_html($msg); ?></p></div>
             <?php endif; ?>
@@ -131,7 +131,7 @@ class Class_Devices_Admin {
             <form method="get">
                 <input type="hidden" name="page" value="eligius-devices" />
                 <input type="number" name="user_id" placeholder="User ID" value="<?php echo esc_attr(isset($_GET['user_id']) ? (int) $_GET['user_id'] : ''); ?>" min="1" style="width:120px;" />
-                <button class="button"><?php esc_html_e('Filter by User', 'eligius-subscription'); ?></button>
+                <button class="button"><?php esc_html_e('فیلتر بر اساس کاربر', 'eligius-subscription'); ?></button>
             </form>
 
             <?php
@@ -152,7 +152,7 @@ class Class_Devices_Admin {
         <table class="widefat striped">
             <thead>
                 <tr>
-                    <th>ID</th><th>Hash (short)</th><th>Label</th><th>Active</th><th>Blocked</th><th>Last Seen</th><th>Actions</th>
+                    <th>شناسه</th><th>هش (کوتاه)</th><th>برچسب</th><th>فعال</th><th>مسدود</th><th>آخرین اتصال</th><th>عملیات</th>
                 </tr>
             </thead>
             <tbody>

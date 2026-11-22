@@ -47,10 +47,10 @@ class Class_Gateway_Settings {
 
     private function guard() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
         if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'eligius_sub_gateway')) {
-            wp_die(esc_html__('Invalid nonce.', 'eligius-subscription'));
+            wp_die('نشانه امنیتی نامعتبر است.');
         }
     }
 
@@ -108,7 +108,7 @@ class Class_Gateway_Settings {
 
     public function render() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
 
         $enabled     = (bool) get_option('eligius_zarinpal_enabled', false);
@@ -120,17 +120,17 @@ class Class_Gateway_Settings {
         $msg = isset($_GET['eligius_msg']) ? sanitize_text_field(wp_unslash($_GET['eligius_msg'])) : '';
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Payment Settings', 'eligius-subscription'); ?></h1>
+            <h1><?php esc_html_e('تنظیمات پرداخت', 'eligius-subscription'); ?></h1>
 
             <?php if ('saved' === $msg) : ?>
-                <div class="notice notice-success"><p><?php esc_html_e('Settings saved.', 'eligius-subscription'); ?></p></div>
+                <div class="notice notice-success"><p><?php esc_html_e('تنظیمات ذخیره شد.', 'eligius-subscription'); ?></p></div>
             <?php elseif ('' !== $msg) : ?>
                 <div class="notice notice-info"><p><?php echo esc_html($msg); ?></p></div>
             <?php endif; ?>
 
             <?php if (Class_Gateway_Factory::PRODUCTION_LOCKED) : ?>
                 <div class="notice notice-warning"><p>
-                    <?php esc_html_e('Production payments are LOCKED (TD-6, sandbox-first). Only the Sandbox environment can be used in this phase.', 'eligius-subscription'); ?>
+                    <?php esc_html_e('پرداخت واقعی قفل است (TD-6، اولویت با تست). در این مرحله فقط محیط Sandbox قابل استفاده است.', 'eligius-subscription'); ?>
                 </p></div>
             <?php endif; ?>
 
@@ -140,16 +140,16 @@ class Class_Gateway_Settings {
 
                 <table class="form-table">
                     <tr>
-                        <th><?php esc_html_e('ZarinPal', 'eligius-subscription'); ?></th>
+                        <th><?php esc_html_e('زرین‌پال', 'eligius-subscription'); ?></th>
                         <td>
                             <label>
                                 <input type="checkbox" name="zarinpal_enabled" value="1" <?php checked($enabled); ?> />
-                                <?php esc_html_e('Enable gateway (Sandbox only)', 'eligius-subscription'); ?>
+                                <?php esc_html_e('فعال‌سازی درگاه (فقط Sandbox)', 'eligius-subscription'); ?>
                             </label>
                         </td>
                     </tr>
                     <tr>
-                        <th><?php esc_html_e('Environment', 'eligius-subscription'); ?></th>
+                        <th><?php esc_html_e('محیط', 'eligius-subscription'); ?></th>
                         <td>
                             <code>Sandbox</code>
                             <span style="color:#d63638; margin-left:8px;">
@@ -158,7 +158,7 @@ class Class_Gateway_Settings {
                         </td>
                     </tr>
                     <tr>
-                        <th><label for="zarinpal_merchant"><?php esc_html_e('Merchant ID', 'eligius-subscription'); ?></label></th>
+                        <th><label for="zarinpal_merchant"><?php esc_html_e('شناسه پذیرنده (Merchant ID)', 'eligius-subscription'); ?></label></th>
                         <td>
                             <input type="text" id="zarinpal_merchant" name="zarinpal_merchant"
                                    autocomplete="off"
@@ -176,18 +176,18 @@ class Class_Gateway_Settings {
                         </td>
                     </tr>
                     <tr>
-                        <th><?php esc_html_e('Callback URL', 'eligius-subscription'); ?></th>
+                        <th><?php esc_html_e('آدرس بازگشت (Callback)', 'eligius-subscription'); ?></th>
                         <td><code><?php echo esc_html(Class_Gateway_Factory::callback_url('zarinpal')); ?></code></td>
                     </tr>
                 </table>
 
-                <?php submit_button(esc_html__('Save settings', 'eligius-subscription')); ?>
+                <?php submit_button(esc_html__('ذخیره تنظیمات', 'eligius-subscription')); ?>
             </form>
 
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:12px;">
                 <?php wp_nonce_field('eligius_sub_gateway'); ?>
                 <input type="hidden" name="action" value="eligius_sub_test_gateway" />
-                <?php submit_button(esc_html__('Test sandbox connection', 'eligius-subscription'), 'secondary'); ?>
+                <?php submit_button(esc_html__('تست اتصال Sandbox', 'eligius-subscription'), 'secondary'); ?>
             </form>
         </div>
         <?php

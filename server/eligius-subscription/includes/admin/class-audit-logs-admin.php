@@ -14,7 +14,7 @@ class Class_Audit_Logs_Admin {
 
     public static function render() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
 
         $filters = [
@@ -26,7 +26,7 @@ class Class_Audit_Logs_Admin {
         $rows = Class_Audit_Log_Repository::admin_list($filters, $page, 30);
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Audit Logs', 'eligius-subscription'); ?></h1>
+            <h1><?php esc_html_e('لاگ‌های امنیتی', 'eligius-subscription'); ?></h1>
 
             <form method="get">
                 <input type="hidden" name="page" value="eligius-audit-logs" />
@@ -38,7 +38,7 @@ class Class_Audit_Logs_Admin {
                     <?php endforeach; ?>
                 </select>
                 <input type="number" name="user_id" placeholder="User ID" value="<?php echo esc_attr($filters['user_id'] ?: ''); ?>" min="0" style="width:110px;" />
-                <button class="button"><?php esc_html_e('Filter', 'eligius-subscription'); ?></button>
+                <button class="button"><?php esc_html_e('فیلتر', 'eligius-subscription'); ?></button>
             </form>
 
             <table class="widefat striped" style="margin-top:12px;">
@@ -49,7 +49,7 @@ class Class_Audit_Logs_Admin {
                 </thead>
                 <tbody>
                 <?php if (empty($rows)) : ?>
-                    <tr><td colspan="9"><?php esc_html_e('No audit entries found.', 'eligius-subscription'); ?></td></tr>
+                    <tr><td colspan="9"><?php esc_html_e('موردی یافت نشد.', 'eligius-subscription'); ?></td></tr>
                 <?php else : foreach ($rows as $row) : ?>
                     <tr>
                         <td><?php echo esc_html($row->id); ?></td>
@@ -76,7 +76,7 @@ class Class_Audit_Logs_Admin {
                 <?php if ($page > 1) : ?>
                     <a class="button" href="<?php echo esc_url(add_query_arg('paged', $page - 1)); ?>">«</a>
                 <?php endif; ?>
-                <?php esc_html_e('Page', 'eligius-subscription'); ?> <?php echo esc_html($page); ?>
+                <?php esc_html_e('صفحه', 'eligius-subscription'); ?> <?php echo esc_html($page); ?>
                 <a class="button" href="<?php echo esc_url(add_query_arg('paged', $page + 1)); ?>">»</a>
             </p>
         </div>

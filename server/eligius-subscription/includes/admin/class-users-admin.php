@@ -17,7 +17,7 @@ class Class_Users_Admin {
         global $wpdb;
 
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
 
         $search   = isset($_GET['s']) ? sanitize_text_field(wp_unslash($_GET['s'])) : '';
@@ -56,23 +56,23 @@ class Class_Users_Admin {
         $rows = $wpdb->get_results($wpdb->prepare($sql, $where_args));
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Users', 'eligius-subscription'); ?></h1>
+            <h1><?php esc_html_e('کاربران', 'eligius-subscription'); ?></h1>
 
             <form method="get">
                 <input type="hidden" name="page" value="eligius-users" />
                 <input type="search" name="s" value="<?php echo esc_attr($search); ?>" placeholder="<?php esc_attr_e('Search username / email', 'eligius-subscription'); ?>" />
-                <button class="button"><?php esc_html_e('Search', 'eligius-subscription'); ?></button>
+                <button class="button"><?php esc_html_e('جستجو', 'eligius-subscription'); ?></button>
             </form>
 
             <table class="widefat striped" style="margin-top:12px;">
                 <thead>
                     <tr>
-                        <th>ID</th><th>Username</th><th>Email</th><th>Name</th><th>Registered</th><th>Subscription</th><th>Plan</th><th>Devices</th>
+                        <th>شناسه</th><th>نام کاربری</th><th>ایمیل</th><th>نام</th><th>تاریخ عضویت</th><th>اشتراک</th><th>پلن</th><th>دستگاه‌ها</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php if (empty($rows)) : ?>
-                    <tr><td colspan="8"><?php esc_html_e('No users found.', 'eligius-subscription'); ?></td></tr>
+                    <tr><td colspan="8"><?php esc_html_e('کاربری یافت نشد.', 'eligius-subscription'); ?></td></tr>
                 <?php else : foreach ($rows as $row) : ?>
                     <tr>
                         <td><?php echo esc_html($row->ID); ?></td>
@@ -89,7 +89,7 @@ class Class_Users_Admin {
             </table>
 
             <p>
-                <?php esc_html_e('Page', 'eligius-subscription'); ?> <?php echo esc_html($page); ?>
+                <?php esc_html_e('صفحه', 'eligius-subscription'); ?> <?php echo esc_html($page); ?>
                 <a class="button" href="<?php echo esc_url(add_query_arg('paged', $page + 1)); ?>">»</a>
             </p>
         </div>

@@ -14,7 +14,7 @@ class Class_Admin_Dashboard {
 
     public static function render() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
 
         $stats  = Class_License_Repository::stats() ?: ['active' => 0, 'trials' => 0, 'revoked' => 0, 'expired' => 0, 'total' => 0];
@@ -22,11 +22,11 @@ class Class_Admin_Dashboard {
         $kid    = $issuer->key_id();
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e('Eligius — Subscription Dashboard', 'eligius-subscription'); ?></h1>
+            <h1><?php esc_html_e('Eligius — داشبورد اشتراک', 'eligius-subscription'); ?></h1>
 
             <?php if ($issuer->is_fallback_key()) : ?>
                 <div class="notice notice-warning"><p>
-                    <?php esc_html_e('The license signing key is stored in the database (dev fallback). For production, define ELIGIUS_SUB_SIGNING_PRIVATE_KEY in wp-config.php as the base64 Ed25519 secret key.', 'eligius-subscription'); ?>
+                    <?php esc_html_e('کلید امضای لایسنس در دیتابیس ذخیره شده (حالت توسعه). برای production، ثابت ELIGIUS_SUB_SIGNING_PRIVATE_KEY را در wp-config.php به‌صورت کلید خصوصی Ed25519 base64 تعریف کنید.', 'eligius-subscription'); ?>
                 </p></div>
             <?php endif; ?>
 
@@ -60,10 +60,10 @@ class Class_Admin_Dashboard {
 
             <p style="margin-top:16px;">
                 <a class="button button-primary" href="<?php echo esc_url(admin_url('admin.php?page=eligius-licenses')); ?>">
-                    <?php esc_html_e('Manage licenses', 'eligius-subscription'); ?>
+                    <?php esc_html_e('مدیریت لایسنس‌ها', 'eligius-subscription'); ?>
                 </a>
                 <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=eligius-audit-logs')); ?>">
-                    <?php esc_html_e('Audit logs', 'eligius-subscription'); ?>
+                    <?php esc_html_e('لاگ‌های امنیتی', 'eligius-subscription'); ?>
                 </a>
             </p>
         </div>

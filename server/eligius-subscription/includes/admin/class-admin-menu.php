@@ -29,6 +29,7 @@ class Class_Admin_Menu {
         add_action('admin_post_eligius_sub_revoke_license', [$this, 'handle_revoke']);
         add_action('admin_post_eligius_sub_extend_license', [$this, 'handle_extend']);
         add_action('admin_init', [\Eligius_Sub\Core\Class_Database::class, 'maybe_upgrade']);
+        \Eligius_Sub\Admin\Class_Plans_Admin::instance(); // P9.1: صفحه پلن‌ها + handlerها
     }
 
     public function register_menu() {
@@ -44,31 +45,32 @@ class Class_Admin_Menu {
             58
         );
 
-        add_submenu_page('eligius-sub', 'Dashboard', 'Dashboard', $capability, 'eligius-sub', [Class_Admin_Dashboard::class, 'render']);
-        add_submenu_page('eligius-sub', 'Licenses', 'Licenses', $capability, 'eligius-licenses', [Class_Licenses_Admin::class, 'render']);
-        add_submenu_page('eligius-sub', 'Users', 'Users', $capability, 'eligius-users', [Class_Users_Admin::class, 'render']);
-        add_submenu_page('eligius-sub', 'Audit Logs', 'Audit Logs', $capability, 'eligius-audit-logs', [Class_Audit_Logs_Admin::class, 'render']);
-        add_submenu_page('eligius-sub', 'Devices', 'Devices', $capability, 'eligius-devices', [Class_Devices_Admin::class, 'render_all']);
+        add_submenu_page('eligius-sub', 'داشبورد', 'داشبورد', $capability, 'eligius-sub', [Class_Admin_Dashboard::class, 'render']);
+        add_submenu_page('eligius-sub', 'پلن‌ها', 'پلن‌ها', $capability, 'eligius-plans', [Class_Plans_Admin::class, 'render']);
+        add_submenu_page('eligius-sub', 'لایسنس‌ها', 'لایسنس‌ها', $capability, 'eligius-licenses', [Class_Licenses_Admin::class, 'render']);
+        add_submenu_page('eligius-sub', 'کاربران', 'کاربران', $capability, 'eligius-users', [Class_Users_Admin::class, 'render']);
+        add_submenu_page('eligius-sub', 'لاگ‌های امنیتی', 'لاگ‌های امنیتی', $capability, 'eligius-audit-logs', [Class_Audit_Logs_Admin::class, 'render']);
+        add_submenu_page('eligius-sub', 'دستگاه‌ها', 'دستگاه‌ها', $capability, 'eligius-devices', [Class_Devices_Admin::class, 'render_all']);
     }
 
     /** Shared guard for admin_post actions (nonce + capability). */
     private function guard() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
         $nonce = $_POST['_wpnonce'] ?? '';
         if (!wp_verify_nonce($nonce, 'eligius_sub_admin_action')) {
-            wp_die(esc_html__('Invalid nonce.', 'eligius-subscription'));
+            wp_die('نشانه امنیتی نامعتبر است.');
         }
     }
 
     /** Shared guard for admin_post device actions (nonce + capability). */
     public function device_guard() {
         if (!current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'eligius-subscription'));
+            wp_die('دسترسی کافی ندارید.');
         }
         if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'eligius_sub_device_admin')) {
-            wp_die(esc_html__('Invalid nonce.', 'eligius-subscription'));
+            wp_die('نشانه امنیتی نامعتبر است.');
         }
     }
 

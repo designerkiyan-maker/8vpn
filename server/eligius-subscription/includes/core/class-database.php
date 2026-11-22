@@ -81,6 +81,9 @@ class Class_Database {
         // Phase 5 migration: add `blocked` column to wp_eligius_devices if missing.
         self::migrate_add_blocked_column();
 
+        // P9.1 migration: plan_type + volume_gb on wp_eligius_plans.
+        self::migrate_plans_columns();
+
         return true;
     }
 
@@ -101,6 +104,29 @@ class Class_Database {
         $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN `blocked` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_active`");
         if ('' !== $wpdb->last_error) {
             error_log('eligius-subscription: failed to add blocked column to ' . $table . ': ' . $wpdb->last_error);
+        }
+    }
+
+    /**
+     * P9.1 migration: plan_type ('timed'|'volume') + volume_gb columns on
+     * wp_eligius_plans — idempotent via column_exists checks.
+     */
+    private static function migrate_plans_columns() {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eligius_plans';
+
+        $exists = $wpdb->get_results(
+            "SHOW COLUMNS FROM `{$table}` LIKE 'plan_type'",
+            ARRAY_A
+        );
+        if ('' !== $wpdb->last_error || !empty($exists)) {
+            return; // already migrated or table missing
+        }
+        $wpdb->query("ALTER TABLE `{$table}`
+            ADD COLUMN `plan_type` VARCHAR(10) NOT NULL DEFAULT 'timed' AFTER `label`,
+            ADD COLUMN `volume_gb` INT UNSIGNED NULL AFTER `plan_type`");
+        if ('' !== $wpdb->last_error) {
+            error_log('eligius-subscription: failed to add plan_type/volume_gb to ' . $table . ': ' . $wpdb->last_error);
         }
     }
 
@@ -164,10 +190,15 @@ class Class_Database {
         switch ($suffix) {
             case 'eligius_plans':
                 // Columns per doc 01 §2.3 create_default_plans() + doc 03 §4.1 response fields.
+                // P9.1: plan_type ('timed'|'volume') + volume_gb — the two plan
+                // families (volume plans block the connection when the quota is
+                // exhausted; timed plans end at expiry).
                 return "CREATE TABLE IF NOT EXISTS `{$p}eligius_plans` (
                     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                     `plan_key` VARCHAR(32) NOT NULL,
                     `label` VARCHAR(64) NOT NULL,
+                    `plan_type` VARCHAR(10) NOT NULL DEFAULT 'timed',
+                    `volume_gb` INT UNSIGNED NULL,
                     `duration_days` SMALLINT UNSIGNED NOT NULL,
                     `price_irt` BIGINT UNSIGNED NOT NULL DEFAULT 0,
                     `discount_percent` TINYINT UNSIGNED NOT NULL DEFAULT 0,
