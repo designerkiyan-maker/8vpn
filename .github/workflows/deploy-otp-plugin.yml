@@ -29,31 +29,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Locate plugins directory over FTP (read-only probes)
+      - name: Locate wp-content + eligius-otp.php over FTP (diagnostic)
         env:
           FTP_HOST: ${{ secrets.ELIGIUS_FTP_HOST }}
           FTP_USER: ${{ secrets.ELIGIUS_FTP_USER }}
           FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
           FTP_PATH: ${{ secrets.ELIGIUS_FTP_PATH }}
         run: |
+          # walk from the known-good APK upload dir (ELIGIUS_FTP_PATH) up to
+          # the site root, LISTING each level until wp-content appears —
+          # listings show filenames only (no secret values are printed).
           P="${FTP_PATH%/}"
-          CANDIDATES=("wp-content/plugins" "public_html/wp-content/plugins")
-          PARENT="$(dirname "$P")"
-          CANDIDATES+=("$PARENT/wp-content/plugins" "$PARENT/public_html/wp-content/plugins")
-          PLUGINS=""
-          for c in "${CANDIDATES[@]}"; do
-            echo "probing: ftp://$FTP_HOST/$c/"
-            if curl -s --max-time 30 "ftp://$FTP_HOST/$c/" --user "$FTP_USER:$FTP_PASS" | grep -qi "eligius-otp"; then
-              PLUGINS="$c"
-              echo "FOUND the live plugin under: $c"
+          DIRS=("$P" "$(dirname "$P")" "$(dirname "$(dirname "$P")")" "/")
+          FOUND=""
+          for d in "${DIRS[@]}"; do
+            case "$d" in /*) dd="${d#/}";; *) dd="$d";; esac
+            URL="ftp://$FTP_HOST/$dd/"
+            echo "== LIST $URL"
+            L=$(curl -s --max-time 30 "$URL" --user "$FTP_USER:$FTP_PASS") || true
+            [ -z "$L" ] && { echo "   (empty or unreachable)"; continue; }
+            echo "$L" | sed 's/^/   | /' | head -50
+            if echo "$L" | grep -qi "wp-content"; then
+              FOUND="$dd"
+              echo "FOUND wp-content under: /$dd"
               break
             fi
           done
-          if [ -z "$PLUGINS" ]; then
-            echo "::error::eligius-otp.php was not found on the FTP paths probed — deploy manually via the hosting panel (wp-content/plugins/eligius-otp.php)."
+          if [ -z "$FOUND" ]; then
+            echo "::error::wp-content is not reachable over FTP with the ELIGIUS_FTP_* account (probed: APK dir and its parents). Deploy manually via the hosting panel."
             exit 1
           fi
-          echo "PLUGINS_DIR=$PLUGINS" >> "$GITHUB_ENV"
+          # locate eligius-otp.php under wp-content/plugins
+          for c in "$FOUND/wp-content/plugins" "$FOUND/plugins"; do
+            URL="ftp://$FTP_HOST/${c#/}/"
+            echo "== LIST $URL"
+            L=$(curl -s --max-time 30 "$URL" --user "$FTP_USER:$FTP_PASS") || true
+            [ -z "$L" ] && { echo "   (empty or unreachable)"; continue; }
+            echo "$L" | sed 's/^/   | /' | head -50
+            if echo "$L" | grep -qi "eligius-otp"; then
+              echo "PLUGINS_DIR=$c" >> "$GITHUB_ENV"
+              echo "FOUND eligius-otp.php under: /$c"
+              break
+            fi
+          done
+          if ! grep -qE "^PLUGINS_DIR=" "$GITHUB_ENV"; then
+            echo "::error::eligius-otp.php was not found under the probed wp-content paths — deploy manually via the hosting panel."
+            exit 1
+          fi
 
       - name: Backup current live plugin
         env:
