@@ -70,6 +70,20 @@ class Class_Gateway_Factory {
             return null;
         }
 
+        // P8.11 (owner decision): SANDBOX mode = the SIMULATED gateway.
+        // ZarinPal's sandbox PAYMENT PAGE is deprecated and returns
+        // "payment failed" even for valid authorities, while the sandbox
+        // request/verify APIs work — so sandbox mode now completes the flow
+        // with the built-in simulated gateway (no real money, no ZarinPal
+        // page). SECURITY: while sandbox mode is enabled on a live host,
+        // registered users can complete payments without paying — enable
+        // sandbox ONLY while testing. Production mode never returns this
+        // gateway, and a SIM authority is rejected by the real ZarinPal
+        // verify endpoint (fail-closed).
+        if ('sandbox' === $env && 'zarinpal' === $gateway_key) {
+            return new Gateways\Class_Simulated_Gateway(self::callback_url($gateway_key));
+        }
+
         $merchant = self::merchant_id($gateway_key);
         if ('' === $merchant) {
             return null;
