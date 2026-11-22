@@ -1,0 +1,91 @@
+# Eligius — Deploy the OTP registration plugin to the live host (TD-10).
+#
+# WHY: the repo's server/eligius-otp.php makes national_code OPTIONAL
+# (TD-10, commit 6511581) but the live host wp.mrkiyan.ir still runs the
+# OLD copy that REQUIRES it — the Android 1.3.12 app no longer sends the
+# field, so live registration fails with rest_missing_callback_param.
+#
+# SAFETY: workflow_dispatch + push gated to the plugin/workflow files only;
+# backs up the live file BEFORE overwriting; verifies the uploaded bytes
+# byte-for-byte (sha256) against the repo version; deploy-only (no tag,
+# no APK release, no app artifacts).
+name: Deploy OTP plugin (live)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/eligius-otp.php"
+      - ".github/workflows/deploy-otp-plugin.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-otp:
+    name: Deploy eligius-otp.php to wp.mrkiyan.ir
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate plugins directory over FTP (read-only probes)
+        env:
+          FTP_HOST: ${{ secrets.ELIGIUS_FTP_HOST }}
+          FTP_USER: ${{ secrets.ELIGIUS_FTP_USER }}
+          FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
+          FTP_PATH: ${{ secrets.ELIGIUS_FTP_PATH }}
+        run: |
+          P="${FTP_PATH%/}"
+          CANDIDATES=("wp-content/plugins" "public_html/wp-content/plugins")
+          PARENT="$(dirname "$P")"
+          CANDIDATES+=("$PARENT/wp-content/plugins" "$PARENT/public_html/wp-content/plugins")
+          PLUGINS=""
+          for c in "${CANDIDATES[@]}"; do
+            echo "probing: ftp://$FTP_HOST/$c/"
+            if curl -s --max-time 30 "ftp://$FTP_HOST/$c/" --user "$FTP_USER:$FTP_PASS" | grep -qi "eligius-otp"; then
+              PLUGINS="$c"
+              echo "FOUND the live plugin under: $c"
+              break
+            fi
+          done
+          if [ -z "$PLUGINS" ]; then
+            echo "::error::eligius-otp.php was not found on the FTP paths probed — deploy manually via the hosting panel (wp-content/plugins/eligius-otp.php)."
+            exit 1
+          fi
+          echo "PLUGINS_DIR=$PLUGINS" >> "$GITHUB_ENV"
+
+      - name: Backup current live plugin
+        env:
+          FTP_HOST: ${{ secrets.ELIGIUS_FTP_HOST }}
+          FTP_USER: ${{ secrets.ELIGIUS_FTP_USER }}
+          FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
+        run: |
+          curl -s --max-time 60 "ftp://$FTP_HOST/$PLUGINS_DIR/eligius-otp.php" --user "$FTP_USER:$FTP_PASS" -o live-backup-eligius-otp.php
+          test -s live-backup-eligius-otp.php || { echo "::error::could not download the live plugin for backup — aborting before any change."; exit 1; }
+          echo "backup size: $(stat -c %s live-backup-eligius-otp.php) bytes"
+
+      - name: Upload fixed plugin (national_code optional — TD-10)
+        run: |
+          curl -sS --max-time 60 -T "server/eligius-otp.php" "ftp://$FTP_HOST/$PLUGINS_DIR/eligius-otp.php" --user "$FTP_USER:$FTP_PASS"
+
+      - name: Verify uploaded bytes match the repo version
+        env:
+          FTP_HOST: ${{ secrets.ELIGIUS_FTP_HOST }}
+          FTP_USER: ${{ secrets.ELIGIUS_FTP_USER }}
+          FTP_PASS: ${{ secrets.ELIGIUS_FTP_PASS }}
+        run: |
+          curl -s --max-time 60 "ftp://$FTP_HOST/$PLUGINS_DIR/eligius-otp.php" --user "$FTP_USER:$FTP_PASS" -o uploaded-check.php
+          A=$(sha256sum server/eligius-otp.php | cut -d' ' -f1)
+          B=$(sha256sum uploaded-check.php | cut -d' ' -f1)
+          echo "repo  sha256: $A"
+          echo "live  sha256: $B"
+          [ "$A" = "$B" ] || { echo "::error::the uploaded file differs from the repo version — investigate before retrying."; exit 1; }
+          echo "DEPLOY VERIFIED byte-for-byte."
+
+      - name: Keep the live backup as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-plugin-backup
+          path: live-backup-eligius-otp.php
+          if-no-files-found: error
