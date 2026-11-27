@@ -239,21 +239,21 @@ class Class_License_Controller extends Class_Api_Controller {
     }
 
     /** GET /plans — public catalog (docs 03 §4.1) + P9.1 plan_type/volume_gb
-     *  برای کارت‌های خرید اپ (حجمی / زمان‌دار-نامحدود). */
+     *  برای کارت‌های خرید اپ (حجمی / زمان‌دار-نامحدود / رایگان — P9.1.3). */
     public function route_plans() {
         $manager = \Eligius_Sub\License\Class_License_Manager::instance();
         $rows = $manager->list_plans();
         $plans = [];
         foreach ($rows as $r) {
             $type = (string) ($r->plan_type ?? 'timed');
-            if (!in_array($type, ['timed', 'volume'], true)) {
+            if (!in_array($type, ['timed', 'volume', 'free'], true)) {
                 $type = 'timed';
             }
             $plans[] = [
                 'key'              => (string) $r->plan_key,
                 'label'            => (string) $r->label,
                 'plan_type'        => $type,
-                'volume_gb'        => ('volume' === $type) ? (int) ($r->volume_gb ?? 0) : null,
+                'volume_gb'        => ('timed' === $type || null === $r->volume_gb) ? null : (int) $r->volume_gb,
                 'duration_days'    => (int) $r->duration_days,
                 'price_irt'        => (int) $r->price_irt,
                 'discount_percent' => (int) $r->discount_percent,

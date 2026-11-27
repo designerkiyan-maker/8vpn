@@ -31,8 +31,14 @@ class Class_Trial_Manager {
     private function __construct() {}
 
     /**
-     * Grant the 30-day trial for $user_id bound (informationally) to the
+     * Grant the trial for $user_id bound (informationally) to the
      * ACTIVE device with $device_hash (doc 05 §3.2).
+     *
+     * P9.1.2: duration + label now come from the admin-editable trial plan
+     * row (wp_eligius_plans, is_trial=1) — «پلن‌ها» edits take real effect on
+     * NEW grants (existing trial licenses keep their stored expiry). The
+     * eligius_sub_trial_days option stays as fallback so a missing/broken
+     * plans read can never block provisioning.
      *
      * @param int    $user_id     Authenticated account id.
      * @param string $device_hash Normalized active-device hash.
@@ -95,7 +101,24 @@ class Class_Trial_Manager {
         }
 
         // Create the trial license (account-keyed, device-bound informationally).
-        $trial_days = (int) get_option('eligius_sub_trial_days', 30);
+        // P9.1.2: read the admin-editable trial plan row; graceful fallback to
+        // the option keeps provisioning alive if the read errors or is absent.
+        $trial_plan = $wpdb->get_row(
+            "SELECT label, plan_type, volume_gb, duration_days
+               FROM {$wpdb->prefix}eligius_plans
+              WHERE is_trial = 1
+              ORDER BY id ASC LIMIT 1");
+        if ('' !== $wpdb->last_error) {
+            error_log('eligius-subscription: trial plan read failed, using option fallback: ' . $wpdb->last_error);
+            $trial_plan = null;
+        }
+        $trial_days  = (null !== $trial_plan && (int) $trial_plan->duration_days >= 1)
+            ? (int) $trial_plan->duration_days
+            : (int) get_option('eligius_sub_trial_days', 30);
+        $trial_days  = max(1, $trial_days);
+        $trial_label = (null !== $trial_plan && '' !== (string) $trial_plan->label)
+            ? (string) $trial_plan->label
+            : 'Free Trial';
         $started    = Class_UTC_Time::mysql_utc();
         $expires    = gmdate('Y-m-d H:i:s', strtotime("+{$trial_days} days", strtotime($started)));
 
@@ -103,7 +126,7 @@ class Class_Trial_Manager {
             'user_id'         => (int) $user_id,
             'device_id'       => (int) $device->id,
             'plan_key'        => 'trial',
-            'plan_label'      => 'Free Trial',
+            'plan_label'      => $trial_label,
             'duration_days'   => $trial_days,
             'started_at'      => $started,
             'expires_at'      => $expires,
@@ -122,7 +145,13 @@ class Class_Trial_Manager {
             'device_id'  => (int) $device->id,
             'event_type' => 'trial.granted',
             'new_status' => 'TRIAL',
-            'details'    => ['duration_days' => $trial_days],
+            'details'    => [
+                'duration_days' => $trial_days,
+                'plan_type'     => (null !== $trial_plan && 'volume' === $trial_plan->plan_type) ? 'volume' : 'timed',
+                // P9.2 will gate on this quota — recorded now for the audit trail.
+                'volume_gb'     => (null !== $trial_plan && 'volume' === $trial_plan->plan_type && null !== $trial_plan->volume_gb)
+                    ? (int) $trial_plan->volume_gb : null,
+            ],
         ]);
         if (0 === $event) {
             $wpdb->query('ROLLBACK');

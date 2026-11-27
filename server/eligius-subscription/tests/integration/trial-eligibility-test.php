@@ -36,9 +36,10 @@ function find_or_create_user($wpdb, $login) {
 // ---- Cleanup (by REAL resolved user ids) -------------------------------------
 $u30 = find_or_create_user($wpdb, 'p5trial-u30');
 $u31 = find_or_create_user($wpdb, 'p5trial-u31');
-$wpdb->query("DELETE FROM wp_eligius_device_transfers WHERE user_id IN ($u30, $u31)");
-$wpdb->query("DELETE FROM wp_eligius_licenses       WHERE user_id IN ($u30, $u31)");
-$wpdb->query("DELETE FROM wp_eligius_devices        WHERE user_id IN ($u30, $u31)");
+$u32 = find_or_create_user($wpdb, 'p5trial-u32');
+$wpdb->query("DELETE FROM wp_eligius_device_transfers WHERE user_id IN ($u30, $u31, $u32)");
+$wpdb->query("DELETE FROM wp_eligius_licenses       WHERE user_id IN ($u30, $u31, $u32)");
+$wpdb->query("DELETE FROM wp_eligius_devices        WHERE user_id IN ($u30, $u31, $u32)");
 
 function clear_rl_table($wpdb, array $tuples) {
     // Phase 6 M-3: limiter storage is the rate_limits TABLE — stale buckets
@@ -118,6 +119,43 @@ T('E4b. pending device trial_eligible = FALSE (subscription lives on another dev
 list($code4c, $st4c) = status_of($hashOld31);
 T('E4c. the ACTIVE device still serves the paid license normally',
     200 === $code4c && true === ($st4c['valid'] ?? false) && 'ACTIVE' === ($st4c['status'] ?? ''));
+
+// ---- E5: admin-edited trial plan row drives NEW grants (P9.1.2) --------------
+$trialPlanBefore = $wpdb->get_row(
+    "SELECT id, label, duration_days FROM wp_eligius_plans WHERE is_trial = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
+T('E5. trial plan row exists (seed present)', !empty($trialPlanBefore));
+if (!empty($trialPlanBefore)) {
+    // Exactly what Class_Plans_Admin::handle_save writes on an edit.
+    $wpdb->update('wp_eligius_plans',
+        array('duration_days' => 7, 'label' => 'تریال تستی'),
+        array('id' => (int) $trialPlanBefore['id']));
+
+    update_user_meta($u32, 'mobile', '09123332222');
+    wp_set_current_user($u32);
+    $hash32 = str_repeat('d', 60) . '3333';
+    Class_Device_Repository::create($u32, $hash32, 'pk-u32', 'U32 Dev', 1, 'test');
+    clear_rl_table($wpdb, array(
+        array('trial_user', $u32, 86400), array('trial_ip', '127.0.0.1', 3600),
+        array('validation_device', $hash32, 60),
+    ));
+
+    $resTrial32 = rest_req('POST', '/licenses/trial', $hash32);
+    T('E5b. grant after edit: 201 CREATED', 201 === $resTrial32->get_status());
+    $row32 = $wpdb->get_row($wpdb->prepare(
+        "SELECT plan_label, duration_days, started_at, expires_at FROM wp_eligius_licenses
+          WHERE user_id = %d AND source = 'trial' LIMIT 1", $u32), ARRAY_A);
+    T('E5c. duration_days = 7 (from the edited plan row, not the 30-day option)',
+        $row32 && 7 === (int) $row32['duration_days']);
+    T('E5d. plan_label = the edited label', $row32 && 'تریال تستی' === $row32['plan_label']);
+    $span = $row32 ? (strtotime($row32['expires_at']) - strtotime($row32['started_at'])) : 0;
+    T('E5e. expiry span ≈ 7 days', abs($span - 7 * 86400) <= 60);
+
+    // Restore the seed row so other suites/deploys see the default trial plan.
+    $wpdb->update('wp_eligius_plans',
+        array('duration_days' => (int) $trialPlanBefore['duration_days'],
+              'label'         => $trialPlanBefore['label']),
+        array('id' => (int) $trialPlanBefore['id']));
+}
 
 echo "\nRESULT: $pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);
