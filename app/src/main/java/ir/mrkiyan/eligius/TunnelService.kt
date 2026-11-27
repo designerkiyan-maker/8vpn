@@ -142,13 +142,30 @@ class TunnelService : VpnService() {
     }
 
     /** Periodic license re-validation while the tunnel is UP (CD-5: CRL every
-     *  5 minutes online; Tampered/Expired/Revoked → tunnel stops at the tick). */
+     *  5 minutes online; Tampered/Expired/Revoked/VolumeExhausted → tunnel
+     *  stops at the tick). P9.2: additionally a LOCAL quota pre-check — the
+     *  server only learns used bytes at session end (client-trusted metering),
+     *  so a session that would cross the quota is stopped locally here. */
     private fun startLicenseTick() {
         if (licenseTickJob?.isActive == true) return
         licenseTickJob = scope.launch {
             while (isActive && !stopping) {
                 kotlinx.coroutines.delay(LICENSE_TICK_MS)
                 if (stopping || Engine.status.value.phase != Phase.CONNECTED) continue
+
+                // P9.2: local volume pre-check (no network) — used + this
+                // session's bytes crossing the quota stops the tunnel early.
+                val st = LicenseStore.licenseState.value
+                if (st != null) {
+                    val live = Engine.totalRx.value + Engine.totalTx.value
+                    if (VolumeGate.wouldCross(st.volumeUsedBytes, st.volumeTotalBytes, live, st.offline)) {
+                        Engine.lastReason.value = reasonText("VOLUME_EXHAUSTED")
+                        Engine.log("Volume quota reached locally — stopping tunnel (P9.2)")
+                        stopSession()
+                        break
+                    }
+                }
+
                 val gate = LicenseStore.ensureValid()
                 if (!gate.isValid) {
                     Engine.lastReason.value = gate.error?.let { reasonText(it) }
@@ -173,6 +190,7 @@ class TunnelService : VpnService() {
         error == "DEVICE_LIMIT_REACHED" ->
             "این حساب روی دستگاه دیگری فعال است. انتقال دستگاه با کد پیامکی لازم است."
         error == "LICENSE_REVOKED" -> "اشتراک شما لغو شده است."
+        error == "VOLUME_EXHAUSTED" -> "حجم اشتراک شما تمام شده است. اشتراک جدید تهیه کنید."
         error.startsWith("SUBSCRIPTION_EXPIRED") || error == "NO_ACTIVE_LICENSE" || error == "OFFLINE_GRACE_EXPIRED" ->
             "اشتراک فعال یافت نشد یا منقضی شده است."
         error.startsWith("TIME_TAMPERING") || error.startsWith("NETWORK_ERROR") -> when {
@@ -242,9 +260,11 @@ class TunnelService : VpnService() {
         Engine.resetLive()
         // Server-side lifetime usage: report the finished session for the signed-in
         // account (JWT sessions only; form-login sessions stay local). Best effort.
+        // P9.2: the same deltas feed the quota accountant (licenses/usage).
         if (saved != null && AuthStore.flow.value?.token != null) {
             scope.launch {
                 runCatching { AuthStore.reportUsage(saved.rxBytes, saved.txBytes, saved.durationMs) }
+                runCatching { AuthStore.reportLicenseUsage(saved.rxBytes, saved.txBytes) }
             }
         }
         Engine.paused.value = false

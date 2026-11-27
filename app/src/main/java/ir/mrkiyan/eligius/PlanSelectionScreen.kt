@@ -93,6 +93,20 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(plans.filter { !it.isTrial }, key = { it.planKey }) { plan ->
+                    // P9.2: plan_type aware cards (حجمی / زمان‌دار / رایگان).
+                    val isFree = plan.planType == "free"
+                    val typeFa = when (plan.planType) {
+                        "volume" -> "حجمی"
+                        "free" -> "رایگان"
+                        else -> "زمان‌دار"
+                    }
+                    val volumeText = when {
+                        (plan.planType == "volume" || plan.planType == "free") && plan.volumeGb != null ->
+                            "${plan.volumeGb} گیگ"
+                        else -> "نامحدود"
+                    }
+                    var activating by remember { mutableStateOf(false) }
+                    var activated by remember { mutableStateOf(false) }
                     Card(
                         Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -101,9 +115,29 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                            Text(plan.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(plan.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Box(
+                                    Modifier
+                                        .background(
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            RoundedCornerShape(999.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        typeFa,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                             Text(
-                                "${plan.durationDays} روز",
+                                "$volumeText · ${plan.durationDays} روز",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -112,46 +146,82 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val priceText = if (plan.discountPercent > 0)
-                                    "${plan.priceIrt / 10} تومان (-${plan.discountPercent}٪)"
-                                else "${plan.priceIrt / 10} تومان"
+                                val priceText = when {
+                                    isFree -> "رایگان"
+                                    plan.discountPercent > 0 ->
+                                        "${plan.priceIrt / 10} تومان (-${plan.discountPercent}٪)"
+                                    else -> "${plan.priceIrt / 10} تومان"
+                                }
                                 Text(priceText, fontWeight = FontWeight.Bold)
-                                Button(
-                                    enabled = plan.priceIrt > 0 && !buying,
-                                    onClick = {
-                                        buying = true
-                                        scope.launch {
-                                            runCatching {
-                                                val response = RetrofitClient.paymentApi.createPayment(
-                                                    mapOf(
-                                                        "plan_key" to plan.planKey,
-                                                        "gateway" to "zarinpal"
+                                if (isFree) {
+                                    Button(
+                                        enabled = !activating && !activated,
+                                        onClick = {
+                                            activating = true
+                                            scope.launch {
+                                                runCatching {
+                                                    val response = RetrofitClient.licenseApi.activateFree(
+                                                        mapOf("plan_key" to plan.planKey)
                                                     )
-                                                )
-                                                if (response.isSuccessful) {
-                                                    val data = response.body()?.data
-                                                    val redirect = data?.redirectUrl ?: ""
-                                                    if (redirect.isNotBlank()) {
+                                                    if (response.isSuccessful && response.body()?.data != null) {
+                                                        LicenseStore.invalidateCache()
+                                                        activated = true
                                                         buyError = null
-                                                        // Open the gateway payment page in the browser.
-                                                        ctx.startActivity(
-                                                            android.content.Intent(
-                                                                android.content.Intent.ACTION_VIEW,
-                                                                android.net.Uri.parse(redirect)
-                                                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                        )
                                                     } else {
-                                                        buyError = "درگاه پرداخت پاسخ معتبر نداد."
+                                                        buyError = RetrofitClient.errorMessage(response)
+                                                            ?: "خطا در فعال‌سازی پلن رایگان"
                                                     }
-                                                } else {
-                                                    buyError = RetrofitClient.errorMessage(response) ?: "خطا در ایجاد پرداخت"
-                                                }
-                                            }.onFailure { buyError = "خطای شبکه: ${it.message}" }
-                                            buying = false
+                                                }.onFailure { buyError = "خطای شبکه: ${it.message}" }
+                                                activating = false
+                                            }
                                         }
+                                    ) {
+                                        Text(
+                                            when {
+                                                activated -> "فعال شد ✓"
+                                                activating -> "..."
+                                                else -> "فعال‌سازی"
+                                            }
+                                        )
                                     }
-                                ) {
-                                    Text(if (buying) "..." else "خرید")
+                                } else {
+                                    Button(
+                                        enabled = plan.priceIrt > 0 && !buying,
+                                        onClick = {
+                                            buying = true
+                                            scope.launch {
+                                                runCatching {
+                                                    val response = RetrofitClient.paymentApi.createPayment(
+                                                        mapOf(
+                                                            "plan_key" to plan.planKey,
+                                                            "gateway" to "zarinpal"
+                                                        )
+                                                    )
+                                                    if (response.isSuccessful) {
+                                                        val data = response.body()?.data
+                                                        val redirect = data?.redirectUrl ?: ""
+                                                        if (redirect.isNotBlank()) {
+                                                            buyError = null
+                                                            // Open the gateway payment page in the browser.
+                                                            ctx.startActivity(
+                                                                android.content.Intent(
+                                                                    android.content.Intent.ACTION_VIEW,
+                                                                    android.net.Uri.parse(redirect)
+                                                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                            )
+                                                        } else {
+                                                            buyError = "درگاه پرداخت پاسخ معتبر نداد."
+                                                        }
+                                                    } else {
+                                                        buyError = RetrofitClient.errorMessage(response) ?: "خطا در ایجاد پرداخت"
+                                                    }
+                                                }.onFailure { buyError = "خطای شبکه: ${it.message}" }
+                                                buying = false
+                                            }
+                                        }
+                                    ) {
+                                        Text(if (buying) "..." else "خرید")
+                                    }
                                 }
                             }
                             if (plan.discountPercent > 0) {
@@ -159,6 +229,14 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                                     "قیمت پایه: ${plan.priceIrt / 10} تومان",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (activated) {
+                                Text(
+                                    "اشتراک رایگان روی حساب شما فعال شد — به صفحه اصلی برگردید.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 6.dp)
                                 )
                             }
                         }

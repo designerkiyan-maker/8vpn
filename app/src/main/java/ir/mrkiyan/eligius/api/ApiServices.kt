@@ -4,11 +4,13 @@ import ir.mrkiyan.eligius.api.model.ApiResponse
 import ir.mrkiyan.eligius.api.model.ChallengeData
 import ir.mrkiyan.eligius.api.model.DeviceListData
 import ir.mrkiyan.eligius.api.model.DeviceVerifyData
+import ir.mrkiyan.eligius.api.model.FreeActivationData
 import ir.mrkiyan.eligius.api.model.LicenseStatusData
 import ir.mrkiyan.eligius.api.model.PlanListData
 import ir.mrkiyan.eligius.api.model.RevocationListData
 import ir.mrkiyan.eligius.api.model.TransferStartData
 import ir.mrkiyan.eligius.api.model.TransferVerifyData
+import ir.mrkiyan.eligius.api.model.UsageReportData
 import ir.mrkiyan.eligius.api.model.ValidationData
 import retrofit2.Response
 import retrofit2.http.Body
@@ -35,6 +37,18 @@ interface LicenseApiService {
 
     @GET("plans")
     suspend fun getPlans(): Response<ApiResponse<PlanListData>>
+
+    /** P9.2: monotonic quota accounting (rx+tx deltas of one session). */
+    @POST("licenses/usage")
+    suspend fun reportUsage(
+        @Body body: Map<String, Long>
+    ): Response<ApiResponse<UsageReportData>>
+
+    /** P9.2: activate a FREE plan (price 0, no gateway; once per account). */
+    @POST("licenses/activate-free")
+    suspend fun activateFree(
+        @Body body: Map<String, String>
+    ): Response<ApiResponse<FreeActivationData>>
 }
 
 /** Device endpoints (docs 03 §3, Roadmap P3 — DeviceApiService). */

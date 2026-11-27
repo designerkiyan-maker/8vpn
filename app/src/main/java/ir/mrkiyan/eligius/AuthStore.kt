@@ -197,6 +197,36 @@ object AuthStore {
             }
         }
 
+    /** P9.2: reports the session's rx+tx deltas to the quota accountant
+     *  (POST /licenses/usage — monotonic used_bytes on the current license).
+     *  Best effort like the lifetime report; the server attributes the delta
+     *  when the account still holds an ACTIVE/TRIAL license. */
+    suspend fun reportLicenseUsage(rxBytes: Long, txBytes: Long): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val token = flow.value?.token ?: error("no JWT session")
+                val payload = JSONObject()
+                    .put("rx_bytes", rxBytes.coerceAtLeast(0))
+                    .put("tx_bytes", txBytes.coerceAtLeast(0))
+                    .toString()
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/licenses/usage").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Authorization", "Bearer $token")
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "eligius-android")
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                }
+                try {
+                    con.outputStream.use { it.write(payload.toByteArray()) }
+                    if (con.responseCode !in 200..299) error("HTTP ${con.responseCode}")
+                } finally {
+                    con.disconnect()
+                }
+            }
+        }
+
     /** Step 1 of the OTP registration: validates everything server-side, creates
      *  the account (username = mobile) and sends a 6-digit code via SMS.
      *  [hash] = the SMS-Retriever signature hash so the SMS can be auto-read.

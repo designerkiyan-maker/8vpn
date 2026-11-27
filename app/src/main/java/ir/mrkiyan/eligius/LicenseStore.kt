@@ -38,7 +38,12 @@ object LicenseStore {
         val deviceBound: Boolean = false,
         val deviceId: Long? = null,
         val offline: Boolean = false, // true when granted from the offline entitlement
-        val error: String? = null
+        val error: String? = null,
+        /** P9.2: volume quota (null total = unlimited; client-trusted metering). */
+        val volumeUsedBytes: Long = 0,
+        val volumeTotalBytes: Long? = null,
+        val volumePercent: Int? = null,
+        val volumeExhausted: Boolean = false
     )
 
     data class ValidationResult(
@@ -124,6 +129,11 @@ object LicenseStore {
                 return ValidationResult(false, "LICENSE_REVOKED")
             }
             if (!isExpiredIso(cached.expiresAt)) {
+                // P9.2: a cached quota exhaustion blocks the VPN even though
+                // the license itself is still valid — refresh happens online.
+                if (cached.volumeExhausted) {
+                    return ValidationResult(false, "VOLUME_EXHAUSTED", licenseState = cached)
+                }
                 return ValidationResult(true, licenseState = cached)
             }
         }
@@ -158,8 +168,18 @@ object LicenseStore {
                             status = cached?.status ?: "ACTIVE",
                             expiresAt = epochToIso(v.expiresAt),
                             deviceBound = true,
-                            offline = true
+                            offline = true,
+                            volumeUsedBytes = cached?.volumeUsedBytes ?: 0,
+                            volumeTotalBytes = cached?.volumeTotalBytes,
+                            volumePercent = cached?.volumePercent,
+                            volumeExhausted = cached?.volumeExhausted ?: false
                         )
+                        // P9.2: a cached quota exhaustion blocks the offline
+                        // grant too (offline volume enforcement is cache-based).
+                        if (cached?.volumeExhausted == true) {
+                            licenseState.value = state
+                            return ValidationResult(false, "VOLUME_EXHAUSTED", licenseState = state)
+                        }
                         licenseState.value = state
                         lastCheckedAt.value = System.currentTimeMillis()
                         return ValidationResult(true, licenseState = state)
@@ -205,8 +225,21 @@ object LicenseStore {
                 startedAt = data.startedAt,
                 expiresAt = data.expiresAt,
                 deviceBound = data.deviceBound == true,
-                deviceId = data.deviceId
+                deviceId = data.deviceId,
+                volumeUsedBytes = data.volumeUsedBytes ?: 0,
+                volumeTotalBytes = data.volumeTotalBytes,
+                volumePercent = data.volumePercent,
+                volumeExhausted = data.volumeExhausted
             )
+
+            if (state.valid && state.volumeExhausted) {
+                // P9.2: quota consumed — the license is valid but the VPN gate
+                // blocks; the offline entitlement is NOT refreshed (offline
+                // enforcement below relies on this cached flag instead).
+                licenseState.value = state
+                lastCheckedAt.value = System.currentTimeMillis()
+                return ValidationResult(false, "VOLUME_EXHAUSTED", licenseState = state)
+            }
 
             if (state.valid) {
                 licenseState.value = state

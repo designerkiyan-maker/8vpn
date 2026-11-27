@@ -16,6 +16,9 @@ object LicenseCacheGate {
     fun isCachedLicenseUsable(context: Context): Boolean {
         val cached = LicenseStore.licenseState.value
         if (cached != null && cached.valid && !cached.offline) {
+            // P9.2: a cached quota exhaustion is NOT usable (no network here —
+            // the authoritative refresh happens on the next online validation).
+            if (cached.volumeExhausted) return false
             val expMs = runCatching { java.time.Instant.parse(cached.expiresAt).toEpochMilli() }.getOrNull()
             if (expMs == null || System.currentTimeMillis() < expMs) return true
         }

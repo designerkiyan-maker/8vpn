@@ -34,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -260,6 +261,10 @@ fun HomeScreen(openLogs: () -> Unit) {
                 }
             }
         }
+
+        // ---- P9.2: active subscription card (plan, expiry, volume usage bar)
+        Spacer(Modifier.height(16.dp))
+        SubscriptionCard(licenseState)
 
         // ---- Last / Current Connection Info Card (persists after disconnect)
         Spacer(Modifier.height(16.dp))
@@ -534,6 +539,111 @@ fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
     }
 }
 
+/**
+ * P9.2: active-subscription card — plan label, expiry date and a volume
+ * usage bar (server-driven used/total from /licenses/status). Timed plans
+ * without a quota show «نامحدود». Rendered only for a backend-verified
+ * license (never for the offline-granted state).
+ */
+@Composable
+fun SubscriptionCard(state: LicenseStore.LicenseState?) {
+    if (state == null || !state.valid || state.offline) return
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                state.planLabel ?: "اشتراک",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            if (state.volumeExhausted) {
+                Text(
+                    "حجم تمام شده",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .background(
+                            MaterialTheme.colorScheme.errorContainer,
+                            RoundedCornerShape(999.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        }
+        state.expiresAt?.let { exp ->
+            val expMs = runCatching { java.time.Instant.parse(exp).toEpochMilli() }.getOrElse {
+                runCatching {
+                    java.time.LocalDateTime.parse(exp.replace(' ', 'T'))
+                        .toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+                }.getOrNull()
+            }
+            if (expMs != null) {
+                val expiryFa = java.time.Instant.ofEpochMilli(expMs)
+                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                Text(
+                    "تاریخ انقضا: $expiryFa",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+        val total = state.volumeTotalBytes
+        if (total != null && total > 0) {
+            val used = state.volumeUsedBytes.coerceAtLeast(0L)
+            val fraction = ((used.toDouble() / total).coerceIn(0.0, 1.0)).toFloat()
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                color = if (state.volumeExhausted) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            )
+            Text(
+                "${fmtBytes(used)} از ${fmtBytes(total)} (${state.volumePercent ?: 0}٪)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        } else {
+            Text(
+                "حجم: نامحدود",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "SubscriptionCard")
+@Composable
+private fun SubscriptionCardPreview() {
+    MaterialTheme {
+        SubscriptionCard(
+            LicenseStore.LicenseState(
+                valid = true,
+                licenseId = 42L,
+                planKey = "ep-vol",
+                planLabel = "پلن حجمی ۱۰۰ گیگ",
+                status = "ACTIVE",
+                expiresAt = "2026-12-27 19:00:00",
+                volumeUsedBytes = 60 * 1073741824L,
+                volumeTotalBytes = 100 * 1073741824L,
+                volumePercent = 60,
+                volumeExhausted = false
+            )
+        )
+    }
+}
 /**
  * Phase 5: Trial grant banner — shown when the user has NO valid license
  * (NO_ACTIVE_LICENSE) and the account hasn't used its trial yet. Tapping

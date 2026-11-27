@@ -32,6 +32,11 @@ data class LicenseStatusData(
     @Json(name = "trial_eligible") val trialEligible: Boolean = false,
     /** Phase 5b: active device id when the caller device is pending transfer. */
     @Json(name = "active_device_id") val activeDeviceId: Long? = null,
+    /** P9.2: volume quota (client-trusted metering; null total = unlimited). */
+    @Json(name = "volume_used_bytes") val volumeUsedBytes: Long? = null,
+    @Json(name = "volume_total_bytes") val volumeTotalBytes: Long? = null,
+    @Json(name = "volume_percent") val volumePercent: Int? = null,
+    @Json(name = "volume_exhausted") val volumeExhausted: Boolean = false,
     @Json(name = "offline_entitlement") val offlineEntitlement: OfflineEntitlementData? = null
 )
 
@@ -107,6 +112,10 @@ data class TransferVerifyData(
 data class PlanData(
     @Json(name = "key") val planKey: String = "",
     val label: String = "",
+    /** P9.2: 'volume' | 'timed' | 'free' (older servers omit → timed). */
+    @Json(name = "plan_type") val planType: String = "timed",
+    /** P9.2: GB quota for volume plans (null = unlimited / timed). */
+    @Json(name = "volume_gb") val volumeGb: Int? = null,
     @Json(name = "duration_days") val durationDays: Int = 0,
     @Json(name = "price_irt") val priceIrt: Long = 0,
     @Json(name = "discount_percent") val discountPercent: Int = 0,
@@ -115,6 +124,23 @@ data class PlanData(
 
 data class PlanListData(
     val plans: List<PlanData> = emptyList()
+)
+
+/** P9.2: response of POST /licenses/usage (monotonic quota accounting). */
+data class UsageReportData(
+    val attributed: Boolean = false,
+    @Json(name = "license_id") val licenseId: Long? = null,
+    @Json(name = "used_bytes") val usedBytes: Long = 0,
+    @Json(name = "volume_total_bytes") val volumeTotalBytes: Long? = null,
+    @Json(name = "volume_percent") val volumePercent: Int? = null,
+    @Json(name = "volume_exhausted") val volumeExhausted: Boolean = false
+)
+
+/** P9.2: response of POST /licenses/activate-free. */
+data class FreeActivationData(
+    @Json(name = "license_id") val licenseId: Long = 0,
+    @Json(name = "expires_at") val expiresAt: String = "",
+    @Json(name = "offline_entitlement") val offlineEntitlement: OfflineEntitlementData? = null
 )
 
 

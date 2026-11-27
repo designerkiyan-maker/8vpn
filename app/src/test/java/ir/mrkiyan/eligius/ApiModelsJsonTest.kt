@@ -5,10 +5,12 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import ir.mrkiyan.eligius.api.model.ApiResponse
 import ir.mrkiyan.eligius.api.model.DeviceListData
 import ir.mrkiyan.eligius.api.model.LicenseStatusData
+import ir.mrkiyan.eligius.api.model.PlanData
 import ir.mrkiyan.eligius.api.model.PaymentCreateData
 import ir.mrkiyan.eligius.api.model.PaymentStatusData
 import ir.mrkiyan.eligius.api.model.TransferStartData
 import ir.mrkiyan.eligius.api.model.TransferVerifyData
+import ir.mrkiyan.eligius.api.model.UsageReportData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -61,6 +63,49 @@ class ApiModelsJsonTest {
         val d = moshi.adapter(LicenseStatusData::class.java).fromJson("""{"valid":true}""")!!
         assertFalse(d.trialEligible)
         assertNull(d.activeDeviceId)
+    }
+
+    @Test
+    fun `p92 volume fields parse snake_case and default safely`() {
+        val json = """
+        {"valid":true,"plan_key":"ep-vol","volume_used_bytes":1073741824,
+         "volume_total_bytes":1073741824,"volume_percent":100,"volume_exhausted":true}
+        """.trimIndent()
+        val d = moshi.adapter(LicenseStatusData::class.java).fromJson(json)!!
+        assertEquals(1073741824L, d.volumeUsedBytes)
+        assertEquals(1073741824L, d.volumeTotalBytes)
+        assertEquals(100, d.volumePercent)
+        assertTrue(d.volumeExhausted)
+        // Older servers omit the fields entirely (P9.2 backward compatibility).
+        val old = moshi.adapter(LicenseStatusData::class.java).fromJson("""{"valid":true}""")!!
+        assertNull(old.volumeUsedBytes)
+        assertNull(old.volumeTotalBytes)
+        assertNull(old.volumePercent)
+        assertFalse(old.volumeExhausted)
+    }
+
+    @Test
+    fun `p92 plan_type and volume_gb parse with legacy fallback`() {
+        val p = moshi.adapter(PlanData::class.java).fromJson(
+            """{"key":"ep-free","label":"EP Free","plan_type":"free","volume_gb":5,
+                "duration_days":14,"price_irt":0,"discount_percent":0,"is_trial":false}""")!!
+        assertEquals("free", p.planType)
+        assertEquals(5, p.volumeGb)
+        val legacy = moshi.adapter(PlanData::class.java).fromJson(
+            """{"key":"monthly","label":"Monthly","duration_days":30,"price_irt":150000}""")!!
+        assertEquals("timed", legacy.planType)
+        assertNull(legacy.volumeGb)
+    }
+
+    @Test
+    fun `p92 usage report wire shape`() {
+        val d = moshi.adapter(UsageReportData::class.java).fromJson(
+            """{"attributed":true,"license_id":42,"used_bytes":1500,
+                "volume_total_bytes":1073741824,"volume_percent":0,"volume_exhausted":false}""")!!
+        assertTrue(d.attributed)
+        assertEquals(42L, d.licenseId)
+        assertEquals(1500L, d.usedBytes)
+        assertFalse(d.volumeExhausted)
     }
 
     @Test

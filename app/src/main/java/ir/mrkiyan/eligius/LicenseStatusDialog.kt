@@ -45,6 +45,11 @@ fun LicenseStatusDialog(
             "اشتراک شما لغو شده است. برای ادامه استفاده، اشتراک جدید تهیه کنید.",
             true
         )
+        error == "VOLUME_EXHAUSTED" -> Quadruple(
+            "حجم اشتراک تمام شده",
+            "سهمیه حجم این اشتراک به پایان رسیده است. برای ادامه می‌توانید اشتراک حجمی بالاتر یا اشتراک زمان‌دار (نامحدود) تهیه کنید.",
+            true
+        )
         error == "OFFLINE_GRACE_EXPIRED" || error?.startsWith("SUBSCRIPTION_EXPIRED") == true ||
             error == "NO_ACTIVE_LICENSE" -> Quadruple(
             "اشتراک منقضی شده",
