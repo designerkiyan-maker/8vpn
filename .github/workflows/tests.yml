@@ -74,13 +74,15 @@ jobs:
           chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp
       - name: Provision WordPress
         run: |
-          wp core download --path=wp --locale=en_US
+          set -o pipefail
+          { wp core download --path=wp --locale=en_US
           wp config create --path=wp --dbname=wordpress --dbuser=wordpress \
             --dbpass=wordpress --dbhost=127.0.0.1:3306 --skip-salts
           wp db create --path=wp
           wp core install --path=wp --url=http://localhost:8080 \
             --title="Eligius CI" --admin_user=admin --admin_password=admin-pass \
             --admin_email=admin@example.invalid --skip-email
+          } 2>&1 | tee wp-provision.log
       - name: Activate eligius-subscription
         run: |
           cp -r server/eligius-subscription wp/wp-content/plugins/eligius-subscription
@@ -148,6 +150,7 @@ jobs:
         with:
           name: backend-coverage
           path: |
+            wp-provision.log
             wp/wp-content/plugins/eligius-subscription/tests/integration/*.json
             server/eligius-subscription/tests/integration/cov-aggregate.php
             server/eligius-subscription/tests/integration/cov-runner.php
@@ -168,7 +171,9 @@ jobs:
           # the AGP config here (this job never passed since the first run).
           gradle-version: '8.11.1'
       - name: JVM unit tests (models, SMS OTP extraction)
-        run: gradle testDebugUnitTest jacocoUnitTestReport --no-daemon --console=plain
+        run: |
+          set -o pipefail
+          gradle testDebugUnitTest jacocoUnitTestReport --no-daemon --console=plain 2>&1 | tee gradle-unit.log
       - name: Assemble debug build
         # The repo tracks app/libs/libbox.aar, so no Go toolchain/libbox build
         # is needed here. Signing falls back to the debug key (H-1 limitation —
@@ -180,5 +185,6 @@ jobs:
         with:
           name: android-unit-reports
           path: |
+            gradle-unit.log
             app/build/reports/tests/testDebugUnitTest/
             app/build/reports/jacoco/jacocoUnitTestReport/
