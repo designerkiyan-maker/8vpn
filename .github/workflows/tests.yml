@@ -83,6 +83,11 @@ jobs:
             --title="Eligius CI" --admin_user=admin --admin_password=admin-pass \
             --admin_email=admin@example.invalid --skip-email
           } 2>&1 | tee wp-provision.log
+      - name: Summarize provision failure into job summary
+        if: failure()
+        run: |
+          echo "## wp-provision.log (tail 120)" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 120 wp-provision.log >> "$GITHUB_STEP_SUMMARY" || true
       - name: Activate eligius-subscription
         run: |
           cp -r server/eligius-subscription wp/wp-content/plugins/eligius-subscription
@@ -174,6 +179,11 @@ jobs:
         run: |
           set -o pipefail
           gradle testDebugUnitTest jacocoUnitTestReport --no-daemon --console=plain 2>&1 | tee gradle-unit.log
+      - name: Summarize unit-test failure into job summary
+        if: failure()
+        run: |
+          echo "## gradle-unit.log (tail 160)" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 160 gradle-unit.log >> "$GITHUB_STEP_SUMMARY" || true
       - name: Assemble debug build
         # The repo tracks app/libs/libbox.aar, so no Go toolchain/libbox build
         # is needed here. Signing falls back to the debug key (H-1 limitation —
