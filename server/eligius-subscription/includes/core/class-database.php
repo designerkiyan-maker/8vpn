@@ -84,6 +84,9 @@ class Class_Database {
         // P9.1 migration: plan_type + volume_gb on wp_eligius_plans.
         self::migrate_plans_columns();
 
+        // P9.2 migration: used_bytes quota accounting on wp_eligius_licenses.
+        self::migrate_licenses_used_bytes();
+
         return true;
     }
 
@@ -127,6 +130,28 @@ class Class_Database {
             ADD COLUMN `volume_gb` INT UNSIGNED NULL AFTER `plan_type`");
         if ('' !== $wpdb->last_error) {
             error_log('eligius-subscription: failed to add plan_type/volume_gb to ' . $table . ': ' . $wpdb->last_error);
+        }
+    }
+
+    /**
+     * P9.2 migration: `used_bytes` BIGINT UNSIGNED (client-reported quota
+     * accounting, monotonic — never decreases) on wp_eligius_licenses.
+     * Versioned — idempotent via column_exists checks (doc 02 §5.2).
+     */
+    private static function migrate_licenses_used_bytes() {
+        global $wpdb;
+        $table  = $wpdb->prefix . 'eligius_licenses';
+        $exists = $wpdb->get_results(
+            "SHOW COLUMNS FROM `{$table}` LIKE 'used_bytes'",
+            ARRAY_A
+        );
+        if ('' !== $wpdb->last_error || !empty($exists)) {
+            return; // already migrated or table missing
+        }
+        $wpdb->query("ALTER TABLE `{$table}`
+            ADD COLUMN `used_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `previous_license_id`");
+        if ('' !== $wpdb->last_error) {
+            error_log('eligius-subscription: failed to add used_bytes to ' . $table . ': ' . $wpdb->last_error);
         }
     }
 

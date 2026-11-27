@@ -13,6 +13,7 @@ use Eligius_Sub\Core\Class_Audit_Log_Repository;
 use Eligius_Sub\Core\Class_Device_Repository;
 use Eligius_Sub\Core\Class_License_Repository;
 use Eligius_Sub\Core\Class_UTC_Time;
+use Eligius_Sub\Core\Class_Volume;
 
 class Class_License_Manager {
 
@@ -92,6 +93,11 @@ class Class_License_Manager {
             'device_bound' => true,
         ];
 
+        // P9.2: volume quota fields — the license stays valid=true; the client
+        // gate maps volume_exhausted to VOLUME_EXHAUSTED (doc limitation:
+        // client-trusted metering, swap to 3x-ui later).
+        $response += $this->volume_fields($license);
+
         // Issue offline entitlement when >1h validity remains (doc 04 §5.1).
         if (Class_UTC_Time::is_future($license->expires_at, 3600)) {
             $entitlement = Class_License_Issuer::instance()
@@ -102,6 +108,38 @@ class Class_License_Manager {
         }
 
         return $response;
+    }
+
+    /**
+     * P9.2: quota fields for a license row. Quota comes from the plan row
+     * REGARDLESS of is_active (a quota is a property of the plan definition,
+     * not of catalog visibility); timed plans / null volume → null total.
+     */
+    private function volume_fields($license) {
+        return $this->volume_fields_for($license->plan_key, (int) ($license->used_bytes ?? 0));
+    }
+
+    /** P9.2: quota fields for a (plan_key, used) pair — also used by the usage route. */
+    public function volume_fields_for($plan_key, $used) {
+        global $wpdb;
+        $plan = $wpdb->get_row($wpdb->prepare(
+            "SELECT plan_type, volume_gb FROM {$wpdb->prefix}eligius_plans WHERE plan_key = %s LIMIT 1",
+            (string) $plan_key
+        ));
+        if ('' !== $wpdb->last_error) {
+            // Fail-open: a broken plans read must never invalidate a license.
+            $plan = null;
+        }
+        $total = (null !== $plan && 'timed' !== (string) $plan->plan_type)
+            ? Class_Volume::quota_bytes($plan->volume_gb)
+            : null;
+        $used = max(0, (int) $used);
+        return [
+            'volume_used_bytes'  => $used,
+            'volume_total_bytes' => $total,
+            'volume_percent'     => Class_Volume::percent($used, $total),
+            'volume_exhausted'   => Class_Volume::is_exhausted($used, $total),
+        ];
     }
 
     /**
@@ -119,11 +157,33 @@ class Class_License_Manager {
             if (!$trial) {
                 return ['valid' => false, 'error' => 'NO_ACTIVE_LICENSE'];
             }
+            // P9.2: quota gate applies to trials too (plan-driven volume_gb).
+            if ($this->volume_fields($trial)['volume_exhausted']) {
+                return [
+                    'valid'      => false,
+                    'error'      => 'VOLUME_EXHAUSTED',
+                    'license_id' => (int) $trial->id,
+                    'plan_key'   => (string) $trial->plan_key,
+                    'expires_at' => (string) $trial->expires_at,
+                ];
+            }
             return [
                 'valid'      => true,
                 'license_id' => (int) $trial->id,
                 'plan_key'   => (string) $trial->plan_key,
                 'expires_at' => (string) $trial->expires_at,
+            ];
+        }
+
+        // P9.2: server-side quota enforcement (defense in depth — the client
+        // also gates locally on /licenses/status volume_exhausted).
+        if ($this->volume_fields($license)['volume_exhausted']) {
+            return [
+                'valid'      => false,
+                'error'      => 'VOLUME_EXHAUSTED',
+                'license_id' => (int) $license->id,
+                'plan_key'   => (string) $license->plan_key,
+                'expires_at' => (string) $license->expires_at,
             ];
         }
 
@@ -138,6 +198,121 @@ class Class_License_Manager {
     /** Latest ACTIVE/TRIAL license row or null. */
     public function current_license($user_id) {
         return Class_License_Repository::get_current($user_id);
+    }
+
+    /**
+     * P9.2: activate a FREE plan (price 0, no gateway). Owner decision:
+     * ONCE per account (has_free_ever) and only while the account has NO
+     * ACTIVE/TRIAL license (prevents the fresh free row from shadowing a
+     * paid plan — the trial-shadowing trap documented at Phase 6).
+     * Transaction discipline = Class_Trial_Manager::grant (doc 02 §2.8.1/§2.8.3).
+     *
+     * @return array{license_id:int,expires_at:string,offline_entitlement:?array}|\WP_Error
+     */
+    public function activate_free_license($user_id, $device_hash, $plan_key) {
+        global $wpdb;
+
+        $device = Class_Device_Repository::find_by_hash($user_id, $device_hash);
+        if (!$device || !(int) $device->is_active) {
+            return new \WP_Error('eligius_device_not_found', 'Active device not found for this account.', ['status' => 403]);
+        }
+
+        // Plan must exist, be active, and be a FREE plan.
+        $plan = $wpdb->get_row($wpdb->prepare(
+            "SELECT plan_key, label, plan_type, volume_gb, duration_days
+               FROM {$wpdb->prefix}eligius_plans
+              WHERE plan_key = %s AND is_active = 1 LIMIT 1",
+            (string) $plan_key
+        ));
+        if ('' !== $wpdb->last_error) {
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
+        }
+        if (!$plan || 'free' !== (string) $plan->plan_type) {
+            return new \WP_Error('eligius_plan_not_free', 'This plan cannot be activated for free.', ['status' => 422]);
+        }
+        $days = max(1, (int) $plan->duration_days);
+
+        // ---- Single connection, single transaction -------------------------
+        $wpdb->query('START TRANSACTION');
+
+        // THE LOCK (doc 02 §2.8.1 — shared by bind / transfer / trial / free).
+        $locked = $wpdb->get_row($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->users} WHERE ID = %d FOR UPDATE",
+            (int) $user_id
+        ));
+        if (null === $locked || '' !== $wpdb->last_error) {
+            $wpdb->query('ROLLBACK');
+            return new \WP_Error('eligius_db_lock_failed', 'Could not lock the account row.', ['status' => 500]);
+        }
+
+        // Primary control (owner decision): one free activation EVER.
+        if (Class_License_Repository::has_free_ever($user_id)) {
+            $wpdb->query('COMMIT'); // read-only tx → lock release
+            return new \WP_Error('eligius_free_already_used', 'The free plan was already activated on this account.', ['status' => 409]);
+        }
+        if ('' !== $wpdb->last_error) {
+            $wpdb->query('ROLLBACK');
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
+        }
+
+        // Secondary control: no ACTIVE/TRIAL subscription on the account.
+        if (Class_License_Repository::get_current($user_id)) {
+            $wpdb->query('COMMIT');
+            return new \WP_Error('eligius_license_exists', 'An active subscription already exists on this account.', ['status' => 409]);
+        }
+        if ('' !== $wpdb->last_error) {
+            $wpdb->query('ROLLBACK');
+            return new \WP_Error('eligius_db_error', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
+        }
+
+        $started = Class_UTC_Time::mysql_utc();
+        $expires = gmdate('Y-m-d H:i:s', strtotime("+{$days} days", strtotime($started)));
+
+        $license_id = Class_License_Repository::create([
+            'user_id'       => (int) $user_id,
+            'device_id'     => (int) $device->id,
+            'plan_key'      => (string) $plan->plan_key,
+            'plan_label'    => (string) $plan->label,
+            'duration_days' => $days,
+            'started_at'    => $started,
+            'expires_at'    => $expires,
+            'status'        => 'ACTIVE',
+            'source'        => 'free',
+        ]);
+        if (0 === $license_id || '' !== $wpdb->last_error) {
+            $wpdb->query('ROLLBACK');
+            return new \WP_Error('eligius_db_insert_failed', \Eligius_Sub\Core\Class_DB_Error::message('db', $wpdb->last_error), ['status' => 500]);
+        }
+
+        // Unaudited activation must not commit (doc 02 §2.8.3 step 5).
+        $event = Class_Audit_Log_Repository::insert_license_event([
+            'license_id' => $license_id,
+            'user_id'    => (int) $user_id,
+            'device_id'  => (int) $device->id,
+            'event_type' => 'free.activated',
+            'new_status' => 'ACTIVE',
+            'details'    => [
+                'plan_key'      => (string) $plan->plan_key,
+                'duration_days' => $days,
+                'volume_gb'     => null === $plan->volume_gb ? null : (int) $plan->volume_gb,
+            ],
+        ]);
+        if (0 === $event) {
+            $wpdb->query('ROLLBACK');
+            return new \WP_Error('eligius_db_audit_failed', 'Free activation event insert failed.', ['status' => 500]);
+        }
+
+        $wpdb->query('COMMIT');
+
+        // Offline entitlement is issued after commit (blob issuance does its
+        // own license-row update and never runs inside the transaction).
+        $entitlement = Class_License_Issuer::instance()->issue_offline_entitlement($license_id, (int) $device->id);
+
+        return [
+            'license_id'          => $license_id,
+            'expires_at'          => $expires,
+            'offline_entitlement' => is_wp_error($entitlement) ? null : $entitlement,
+        ];
     }
 
     /** Payment-driven activation (doc 05 §4.1) — standalone transaction. */

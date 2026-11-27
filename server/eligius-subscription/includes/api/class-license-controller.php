@@ -76,6 +76,20 @@ class Class_License_Controller extends Class_Api_Controller {
             'permission_callback' => [self::class, 'permission_user_global'],
         ]);
 
+        // POST /licenses/usage (P9.2 — monotonic quota accounting).
+        register_rest_route(self::NAMESPACE_V1, '/licenses/usage', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'route_usage'],
+            'permission_callback' => [self::class, 'permission_user_global'],
+        ]);
+
+        // POST /licenses/activate-free (P9.2 — free plan, price 0, no gateway).
+        register_rest_route(self::NAMESPACE_V1, '/licenses/activate-free', [
+            'methods'             => 'POST',
+            'callback'            => [$this, 'route_activate_free'],
+            'permission_callback' => [self::class, 'permission_user_global'],
+        ]);
+
         // GET /plans (docs 03 §4.1 — public catalog; used by the P3/P4 UI).
         register_rest_route(self::NAMESPACE_V1, '/plans', [
             'methods'             => 'GET',
@@ -137,9 +151,19 @@ class Class_License_Controller extends Class_Api_Controller {
         }
 
         // Invalid gate response (doc 03 §5.3 — 403 with typed code).
-        $code   = ('NO_ACTIVE_LICENSE' === ($result['error'] ?? '')) ? 'SUBSCRIPTION_EXPIRED' : 'DEVICE_NOT_BOUND';
+        // P9.2: VOLUME_EXHAUSTED passes through so the client can tell a
+        // consumed quota apart from expiry/device issues.
+        $error = (string) ($result['error'] ?? '');
+        $code  = match ($error) {
+            'NO_ACTIVE_LICENSE' => 'SUBSCRIPTION_EXPIRED',
+            'VOLUME_EXHAUSTED'  => 'VOLUME_EXHAUSTED',
+            default             => 'DEVICE_NOT_BOUND',
+        };
+        $message = 'VOLUME_EXHAUSTED' === $code
+            ? 'Volume quota is exhausted for this subscription.'
+            : 'License is not valid for this device.';
         $detail = isset($result['expires_at']) ? null : null;
-        return self::fail($code, 'License is not valid for this device.', 403, $detail);
+        return self::fail($code, $message, 403, $detail);
     }
 
     public function route_offline_entitlement(\WP_REST_Request $request) {
@@ -233,6 +257,124 @@ class Class_License_Controller extends Class_Api_Controller {
             'device_id'  => (int) $device->id,
             'event_type' => 'trial.granted',
             'details'    => ['plan_key' => 'trial'],
+        ]);
+
+        return self::ok($result, 201);
+    }
+
+    /**
+     * POST /licenses/usage — P9.2 monotonic quota accounting (client-trusted
+     * metering, doc limitation; swap to 3x-ui later). One atomic increment on
+     * the account's current license; the volume-exhausted crossing is audited
+     * once. No current license → 200 attributed:false (session may have
+     * outlived its subscription — never an app-facing error).
+     */
+    public function route_usage(\WP_REST_Request $request) {
+        $exceeded = self::rate_limit_or_fail([
+            ['usage_user', (string) get_current_user_id(), 60, 3600],
+            ['usage_ip', (string) ($_SERVER['REMOTE_ADDR'] ?? '0'), 300, 3600],
+        ]);
+        if (null !== $exceeded) {
+            return $exceeded;
+        }
+
+        $rx = (int) $request->get_param('rx_bytes');
+        $tx = (int) $request->get_param('tx_bytes');
+
+        $license = \Eligius_Sub\Core\Class_License_Repository::get_current(get_current_user_id());
+        if (!$license) {
+            return self::ok([
+                'attributed'         => false,
+                'license_id'         => null,
+                'used_bytes'         => 0,
+                'volume_total_bytes' => null,
+                'volume_percent'     => null,
+                'volume_exhausted'   => false,
+            ]);
+        }
+
+        $plan = \Eligius_Sub\License\Class_License_Manager::instance();
+        $before = max(0, (int) ($license->used_bytes ?? 0));
+        $used = \Eligius_Sub\Core\Class_License_Repository::increment_used_bytes(
+            (int) $license->id,
+            $rx + $tx
+        );
+        if (null === $used) {
+            return self::fail('eligius_db_error', 'Usage accounting failed.', 500);
+        }
+
+        // Quota totals from the plan row (same logic as build_response).
+        $vol = $plan->volume_fields_for($license->plan_key, $used);
+        $exhausted = (bool) $vol['volume_exhausted'];
+
+        // Crossing audit — fire once per license when used crosses the quota.
+        if ($exhausted && $before < (int) $vol['volume_total_bytes']) {
+            \Eligius_Sub\Core\Class_Audit_Log_Repository::insert_license_event([
+                'license_id' => (int) $license->id,
+                'user_id'    => get_current_user_id(),
+                'event_type' => 'volume.exhausted',
+                'details'    => [
+                    'used_bytes'  => $used,
+                    'total_bytes' => (int) $vol['volume_total_bytes'],
+                ],
+            ]);
+            \Eligius_Sub\Core\Class_Audit_Log_Repository::insert_audit([
+                'user_id'    => get_current_user_id(),
+                'license_id' => (int) $license->id,
+                'event_type' => 'volume.exhausted',
+                'severity'   => 'WARNING',
+                'details'    => ['used_bytes' => $used, 'total_bytes' => (int) $vol['volume_total_bytes']],
+            ]);
+        }
+
+        return self::ok([
+            'attributed'         => true,
+            'license_id'         => (int) $license->id,
+            'used_bytes'         => $used,
+            'volume_total_bytes' => $vol['volume_total_bytes'],
+            'volume_percent'     => $vol['volume_percent'],
+            'volume_exhausted'   => $exhausted,
+        ]);
+    }
+
+    /**
+     * POST /licenses/activate-free — P9.2 free-plan activation (price 0, no
+     * gateway; once per account, no active subscription — owner decision).
+     */
+    public function route_activate_free(\WP_REST_Request $request) {
+        $device = self::device_or_error($request);
+        if (is_wp_error($device)) {
+            return self::fail_wp_error($device);
+        }
+
+        $exceeded = self::rate_limit_or_fail([
+            ['free_activate_user', (string) get_current_user_id(), 5, 3600],
+            ['free_activate_ip', (string) ($_SERVER['REMOTE_ADDR'] ?? '0'), 10, 3600],
+        ]);
+        if (null !== $exceeded) {
+            return $exceeded;
+        }
+
+        $plan_key = sanitize_text_field((string) $request->get_param('plan_key'));
+        if ('' === $plan_key) {
+            return self::fail('eligius_plan_key_required', 'Plan key is required.', 422);
+        }
+
+        $result = \Eligius_Sub\License\Class_License_Manager::instance()->activate_free_license(
+            get_current_user_id(),
+            (string) $device->device_hash,
+            $plan_key
+        );
+        if (is_wp_error($result)) {
+            return self::fail_wp_error($result);
+        }
+
+        Class_Audit_Log_Repository::insert_audit([
+            'user_id'    => get_current_user_id(),
+            'license_id' => $result['license_id'],
+            'device_id'  => (int) $device->id,
+            'event_type' => 'free.activated',
+            'details'    => ['plan_key' => $plan_key],
         ]);
 
         return self::ok($result, 201);

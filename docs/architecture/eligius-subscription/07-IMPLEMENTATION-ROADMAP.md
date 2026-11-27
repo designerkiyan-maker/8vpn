@@ -807,6 +807,67 @@ Optional: Replace password login with OTP-primary authentication.
 
 ---
 
+## P9 — Volume Plans & Usage (Post-launch extension)
+
+> Phase 9 was defined AFTER the P0–P7 launch with the owner (2026-11-22),
+> simplifying the earlier 3x-ui scenario: the app's own client counter feeds
+> a server-side quota; 3x-ui may later replace the usage source only.
+
+### P9.1 — Plans Admin & Plan Types (done — commit 01d8be3 + ef3a32d)
+- Admin «پلن‌ها» CRUD (Farsi modal UI, app-palette styling) with plan_type
+  `volume | timed | free` (P9.1.3: free = price locked 0, optional volume)
+- DB 1.2.0: `wp_eligius_plans.plan_type` + `volume_gb` (idempotent migration)
+- `/plans` catalog: plan_type + volume_gb passthrough
+- Trial grant is plan-driven (admin-edited trial row drives duration/label —
+  P9.1.2); `/plans` card chips render in-app
+
+### P9.2 — Usage Reporting & Volume Gate
+
+#### Scope
+- DB 1.3.0: `wp_eligius_licenses.used_bytes BIGINT UNSIGNED DEFAULT 0`
+- `POST /licenses/usage` — monotonic quota accounting (atomic single-statement
+  increment, 2^40/report cap, attributed:false when no current license)
+- `POST /licenses/activate-free` — free plan (price 0, no gateway); owner
+  decision: ONCE per account and only with no ACTIVE/TRIAL subscription
+- `/licenses/status` payload: `volume_used_bytes`, `volume_total_bytes`,
+  `volume_percent`, `volume_exhausted` (license stays valid=true)
+- `GET /licenses/validate` → 403 typed `VOLUME_EXHAUSTED` (server enforcement)
+- Client-trusted metering: the app reports rx+tx deltas at session end
+  (`reportLicenseUsage`); honest limitation — reinstall/patch can bypass the
+  client counter; 3x-ui swap replaces the usage source later
+
+#### Rules
+| Rule | Implementation |
+|------|----------------|
+| Quota bytes | `volume_gb × 1024³` (binary GiB, Class_Volume) |
+| Monotonic | single-statement `UPDATE used_bytes = used_bytes + Δ`, negative Δ → 0 |
+| Exhausted | `used_bytes ≥ quota` → `volume_exhausted: true` (status keeps valid=true) |
+| Gate (server) | `/licenses/validate` → 403 `VOLUME_EXHAUSTED` |
+| Gate (client) | `LicenseStore` maps the flag to `VOLUME_EXHAUSTED`; cache + offline + QsTile honor it |
+| Local pre-check | 5-min tick: `used + session bytes ≥ quota` → tunnel stops (`VolumeGate`) |
+| Reset | fresh purchase = fresh row (used=0); renewal-extend keeps quota policy per plan |
+| Free plan | once per account (`source='free'`), no active subscription, rate-limited |
+
+#### Acceptance Criteria
+- [ ] Volume plan licenses accumulate `used_bytes` atomically; never decrease
+- [ ] Crossing the quota audits `volume.exhausted` exactly once
+- [ ] `/licenses/status` carries the four volume fields (timed → total null)
+- [ ] `validate` → 403 `VOLUME_EXHAUSTED` when exhausted; status keeps valid=true
+- [ ] Free plan activates once per account; 409 on repeat / with active sub
+- [ ] App plan cards render type chip + volume/unlimited; free → «فعال‌سازی»
+- [ ] Home subscription card shows plan, expiry, usage bar (error color when exhausted)
+- [ ] App blocks connect + stops running session on exhaustion (dialog + buy CTA)
+
+#### Tests Required
+- Unit: `VolumeMathTest` (quota math, WP-free) — backend; `VolumeGateMappingTest`
+  + `ApiModelsJsonTest` P9.2 wire contracts — Android JVM
+- Integration: endpoint-coverage L8 (usage accumulate/cap/exhaust/audit,
+  attributed:false) + L9 (free activation matrix) + L1d (status fields)
+- Fail-closed: FC-U1 degraded limiter → 503 with ZERO quota side effects
+- Android: `testDebugUnitTest` green; `assembleDebug` green
+
+---
+
 ## 4. Cross-Phase Dependencies
 
 ```

@@ -83,6 +83,40 @@ class Class_License_Repository extends Class_Repository_Base {
         return !empty($id);
     }
 
+    /** One free-plan activation per ACCOUNT (P9.2, owner decision — any status). */
+    public static function has_free_ever($user_id) {
+        global $wpdb;
+        $table = self::table();
+        $id = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM `{$table}` WHERE user_id = %d AND source = 'free' LIMIT 1",
+            (int) $user_id
+        ));
+        return !empty($id);
+    }
+
+    /**
+     * P9.2: monotonic quota accounting — single atomic statement (same
+     * discipline as the rate limiter's counter), never decreases.
+     * Returns the new accumulated value, or null when the row vanished.
+     */
+    public static function increment_used_bytes($license_id, $delta) {
+        global $wpdb;
+        $table = self::table();
+        $wpdb->query($wpdb->prepare(
+            "UPDATE `{$table}` SET used_bytes = used_bytes + %d, updated_at = %s WHERE id = %d",
+            Class_Volume::clamp_delta($delta),
+            Class_UTC_Time::mysql_utc(),
+            (int) $license_id
+        ));
+        if ('' !== $wpdb->last_error) {
+            return null;
+        }
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT used_bytes FROM `{$table}` WHERE id = %d",
+            (int) $license_id
+        ));
+    }
+
     /** Create a license row; returns insert id or 0 on failure. */
     public static function create(array $data) {
         $defaults = [

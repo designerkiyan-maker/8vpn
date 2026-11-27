@@ -111,6 +111,7 @@ require $pluginRoot . '/includes/core/class-utc-time.php';
 require $pluginRoot . '/includes/payment/interface-gateway-adapter.php';
 require $pluginRoot . '/includes/payment/gateways/class-zarinpal-adapter.php';
 require $pluginRoot . '/includes/auth/class-device-auth.php';
+require $pluginRoot . '/includes/core/class-volume.php';
 
 foreach (glob(__DIR__ . '/*Test.php') as $testFile) {
     require $testFile;

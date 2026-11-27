@@ -91,6 +91,9 @@ $wpdb->insert("wp_eligius_payments", array(
     'status' => 'INITIATED', 'initiated_at' => gmdate('Y-m-d H:i:s'),
 ));
 $paymentFc = (int) $wpdb->insert_id;
+// Fixture hygiene: prior suite runs leave idempotency rows for this authority
+// — the reconcile contract (R3/R4) needs a fresh verify→duplicate sequence.
+$wpdb->query($wpdb->prepare("DELETE FROM wp_eligius_payment_idempotency WHERE gateway_ref = %s", 'P6FC-AUTH'));
 // Mock gateway for any route that reaches a gateway (counted — must stay 0 on degraded).
 require_once __DIR__ . '/class-mock-gateway.php';
 add_filter('eligius_sub_payment_gateway_instance', function () { return new Class_Mock_Gateway(); }, 10, 0);
@@ -199,6 +202,28 @@ T('FC5b. NO new INITIATED payment while degraded', 0 === $payRows);
 // Healthy create → 201 (mock gateway).
 $res = dispatch('POST', '/payments/create', $hashDev, array('plan_key' => 'monthly', 'gateway' => 'zarinpal'));
 T('FC5c. healthy payment create → 201', 201 === $res->get_status());
+
+// ---- 5b. License Usage Report (P9.2 — quota accounting is a write) ------------
+wp_set_current_user($u);
+bucket_clear('usage_user', $u, 3600);
+bucket_clear('usage_ip', '127.0.0.1', 3600);
+$usedBefore = (int) $wpdb->get_var(
+    "SELECT used_bytes FROM wp_eligius_licenses WHERE user_id = $u ORDER BY id DESC LIMIT 1");
+degrade_on();
+$res = dispatch('POST', '/licenses/usage', $hashDev, array('rx_bytes' => 4096, 'tx_bytes' => 512));
+degrade_off();
+T('FC-U1. usage report degraded → 503 RATE_LIMIT_UNAVAILABLE',
+    503 === $res->get_status() && 'RATE_LIMIT_UNAVAILABLE' === err_code_of($res));
+$usedAfter = (int) $wpdb->get_var(
+    "SELECT used_bytes FROM wp_eligius_licenses WHERE user_id = $u ORDER BY id DESC LIMIT 1");
+T('FC-U1b. used_bytes UNCHANGED while degraded (no quota side effect)',
+    $usedBefore === $usedAfter);
+// Recovery: the same report succeeds and accumulates exactly once.
+$res = dispatch('POST', '/licenses/usage', $hashDev, array('rx_bytes' => 4096, 'tx_bytes' => 512));
+$d = $res->get_data()['data'] ?? array();
+T('FC-U1c. retry after recovery → 200 attributed, used_bytes +4608',
+    200 === $res->get_status() && true === ($d['attributed'] ?? false)
+    && $usedBefore + 4608 === (int) ($d['used_bytes'] ?? -1));
 
 // ---- 6. Payment Callback (302 pending contract) ---------------------------------
 wp_set_current_user(0);

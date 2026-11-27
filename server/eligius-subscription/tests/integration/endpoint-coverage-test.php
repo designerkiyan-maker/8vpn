@@ -154,6 +154,150 @@ T('L6b. plans (authenticated) → 200 catalog', 200 === $res->get_status() && is
 $res = dispatch('POST', '/licenses/renew', $hashA);
 T('L7. renew → honest typed 503 GATEWAY_UNAVAILABLE', 503 === $res->get_status() && 'GATEWAY_UNAVAILABLE' === err_code_of($res));
 
+// ---- P9.2: volume fields on status + usage report + free activation ----------
+// Extra fixtures: uC (volume quota exhaustion), uD (free activation), uE (exists-conflict).
+$uC = find_user($wpdb, 'p6ep-uC');
+$uD = find_user($wpdb, 'p6ep-uD');
+$uE = find_user($wpdb, 'p6ep-uE');
+foreach (array($uC, $uD, $uE) as $u) {
+    $wpdb->query("DELETE FROM wp_eligius_device_transfers WHERE user_id = $u");
+    $wpdb->query("DELETE FROM wp_eligius_license_events WHERE license_id IN (SELECT id FROM (SELECT id FROM wp_eligius_licenses WHERE user_id = $u) t)");
+    $wpdb->query("DELETE FROM wp_eligius_licenses WHERE user_id = $u");
+    $wpdb->query("DELETE FROM wp_eligius_devices WHERE user_id = $u");
+}
+$wpdb->query("DELETE FROM wp_eligius_plans WHERE plan_key IN ('ep-vol', 'ep-free')");
+$wpdb->insert("wp_eligius_plans", array(
+    'plan_key' => 'ep-vol', 'label' => 'EP Volume', 'plan_type' => 'volume', 'volume_gb' => 1,
+    'duration_days' => 30, 'price_irt' => 99000, 'is_trial' => 0, 'sort' => 90, 'is_active' => 1,
+    'created_at' => gmdate('Y-m-d H:i:s'),
+));
+$wpdb->insert("wp_eligius_plans", array(
+    'plan_key' => 'ep-free', 'label' => 'EP Free', 'plan_type' => 'free', 'volume_gb' => null,
+    'duration_days' => 14, 'price_irt' => 0, 'is_trial' => 0, 'sort' => 91, 'is_active' => 1,
+    'created_at' => gmdate('Y-m-d H:i:s'),
+));
+$hashC = str_repeat('f', 60) . 'cccc';
+$hashD = str_repeat('f', 60) . 'dddd';
+$hashE = str_repeat('f', 60) . 'eeee';
+Class_Device_Repository::create($uC, $hashC, 'pk-c', 'Uc Dev', 1, 'test');
+Class_Device_Repository::create($uD, $hashD, 'pk-d', 'Ud Dev', 1, 'test');
+Class_Device_Repository::create($uE, $hashE, 'pk-e', 'Ue Dev', 1, 'test');
+$devC = Class_Device_Repository::find_by_hash($uC, $hashC);
+$devE = Class_Device_Repository::find_by_hash($uE, $hashE);
+$wpdb->insert("wp_eligius_licenses", array(
+    'user_id' => $uC, 'plan_key' => 'ep-vol', 'plan_label' => 'EP Volume', 'duration_days' => 30,
+    'started_at' => gmdate('Y-m-d H:i:s'), 'expires_at' => gmdate('Y-m-d H:i:s', time() + 86400 * 30),
+    'status' => 'ACTIVE', 'source' => 'payment', 'device_id' => (int) $devC->id,
+    'created_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s'),
+));
+$wpdb->insert("wp_eligius_licenses", array(
+    'user_id' => $uE, 'plan_key' => 'monthly', 'plan_label' => 'Monthly', 'duration_days' => 30,
+    'started_at' => gmdate('Y-m-d H:i:s'), 'expires_at' => gmdate('Y-m-d H:i:s', time() + 86400 * 30),
+    'status' => 'ACTIVE', 'source' => 'payment', 'device_id' => (int) $devE->id,
+    'created_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s'),
+));
+
+// L1d. status now carries the P9.2 volume fields (uA monthly = timed → unlimited).
+$res = dispatch('GET', '/licenses/status', $hashA);
+$d = $res->get_data()['data'] ?? array();
+T('L1d. status volume fields present (timed → total null, not exhausted)',
+    200 === $res->get_status() && array_key_exists('volume_used_bytes', $d)
+    && array_key_exists('volume_total_bytes', $d) && null === $d['volume_total_bytes']
+    && array_key_exists('volume_percent', $d) && null === $d['volume_percent']
+    && false === ($d['volume_exhausted'] ?? true));
+
+// L8. POST /licenses/usage — uA served license is the TRIAL (trial-first order).
+wp_set_current_user(0);
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 1000, 'tx_bytes' => 500));
+T('L8. usage unauthenticated → 401', 401 === $res->get_status());
+wp_set_current_user($uA);
+clear_rl(array(
+    array('usage_user', $uA, 3600), array('usage_ip', '127.0.0.1', 3600),
+    array('usage_user', $uC, 3600), array('usage_user', $uD, 3600), array('usage_user', $uE, 3600),
+    array('free_activate_user', $uD, 3600), array('free_activate_ip', '127.0.0.1', 3600),
+));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 1000, 'tx_bytes' => 500));
+$d = $res->get_data()['data'] ?? array();
+T('L8b. usage report → 200 attributed, used accumulates',
+    200 === $res->get_status() && true === ($d['attributed'] ?? false)
+    && 1500 === (int) ($d['used_bytes'] ?? 0));
+$usedId = (int) ($d['license_id'] ?? 0);
+T('L8c. used_bytes persisted on the served license row',
+    $usedId > 0 && 1500 === (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT used_bytes FROM wp_eligius_licenses WHERE id = %d", $usedId)));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 500, 'tx_bytes' => 0));
+T('L8d. second report → monotonic accumulation (2000)',
+    200 === $res->get_status() && 2000 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => -5, 'tx_bytes' => -5));
+T('L8e. negative deltas → clamped to 0 (never decreases)',
+    200 === $res->get_status() && 2000 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 99999999999999, 'tx_bytes' => 0));
+T('L8f. absurd delta → capped at 2^40 per report',
+    200 === $res->get_status()
+    && 2000 + 1099511627776 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));
+wp_set_current_user($uB);
+$res = dispatch('POST', '/licenses/usage', null, array('rx_bytes' => 123, 'tx_bytes' => 0));
+T('L8g. usage with NO current license → 200 attributed:false (no error noise)',
+    200 === $res->get_status() && false === ($res->get_data()['data']['attributed'] ?? true));
+
+// L8h–L8k. uC with a 1 GiB volume plan → exhaustion gate + one crossing audit.
+wp_set_current_user($uC);
+$res = dispatch('GET', '/licenses/status', $hashC);
+$d = $res->get_data()['data'] ?? array();
+T('L8h. status (volume plan, unused) → total = 1 GiB, percent 0',
+    200 === $res->get_status() && 1073741824 === (int) ($d['volume_total_bytes'] ?? 0)
+    && 0 === (int) ($d['volume_percent'] ?? -1) && false === ($d['volume_exhausted'] ?? true));
+$res = dispatch('POST', '/licenses/usage', $hashC, array('rx_bytes' => 1073741824, 'tx_bytes' => 0));
+$d = $res->get_data()['data'] ?? array();
+T('L8i. usage hits quota → exhausted=true, percent 100',
+    200 === $res->get_status() && true === ($d['volume_exhausted'] ?? false)
+    && 1073741824 === (int) ($d['used_bytes'] ?? 0) && 100 === (int) ($d['volume_percent'] ?? -1));
+$res = dispatch('POST', '/licenses/usage', $hashC, array('rx_bytes' => 100, 'tx_bytes' => 0));
+T('L8j. over-quota report → still exhausted, used keeps growing',
+    200 === $res->get_status() && true === ($res->get_data()['data']['volume_exhausted'] ?? false)
+    && 1073741924 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));
+$crossings = (int) $wpdb->get_var("SELECT COUNT(*) FROM wp_eligius_license_events WHERE license_id IN (SELECT id FROM wp_eligius_licenses WHERE user_id = $uC) AND event_type = 'volume.exhausted'");
+T('L8k. volume.exhausted crossing audited EXACTLY once', 1 === $crossings);
+$res = dispatch('GET', '/licenses/validate', $hashC);
+T('L8l. validate under exhausted quota → 403 VOLUME_EXHAUSTED (typed gate code)',
+    403 === $res->get_status() && 'VOLUME_EXHAUSTED' === err_code_of($res));
+
+// L9. POST /licenses/activate-free — free plan, once per account, no active sub.
+wp_set_current_user(0);
+$res = dispatch('POST', '/licenses/activate-free', $hashD, array('plan_key' => 'ep-free'));
+T('L9. activate-free unauthenticated → 401', 401 === $res->get_status());
+wp_set_current_user($uD);
+$res = dispatch('POST', '/licenses/activate-free', $hashD, array('plan_key' => ''));
+T('L9b. missing plan_key → 422 eligius_plan_key_required',
+    422 === $res->get_status() && 'eligius_plan_key_required' === err_code_of($res));
+$res = dispatch('POST', '/licenses/activate-free', $hashD, array('plan_key' => 'monthly'));
+T('L9c. non-free plan → 422 eligius_plan_not_free',
+    422 === $res->get_status() && 'eligius_plan_not_free' === err_code_of($res));
+$res = dispatch('POST', '/licenses/activate-free', $hashD, array('plan_key' => 'ep-free'));
+$d = $res->get_data()['data'] ?? array();
+T('L9d. free activation (fresh account) → 201 with license + expiry',
+    201 === $res->get_status() && (int) ($d['license_id'] ?? 0) > 0 && '' !== ($d['expires_at'] ?? ''));
+$freeRow = $wpdb->get_row($wpdb->prepare(
+    "SELECT status, source, plan_key FROM wp_eligius_licenses WHERE id = %d", (int) ($d['license_id'] ?? 0)));
+T('L9e. free license row: ACTIVE + source=free + plan preserved',
+    $freeRow && 'ACTIVE' === $freeRow->status && 'free' === $freeRow->source && 'ep-free' === $freeRow->plan_key);
+$res = dispatch('POST', '/licenses/activate-free', $hashD, array('plan_key' => 'ep-free'));
+T('L9f. second free activation → 409 eligius_free_already_used',
+    409 === $res->get_status() && 'eligius_free_already_used' === err_code_of($res));
+wp_set_current_user($uC);
+$res = dispatch('POST', '/licenses/activate-free', $hashC, array('plan_key' => 'ep-free'));
+T('L9g. free activation with an ACTIVE subscription → 409 eligius_license_exists',
+    409 === $res->get_status() && 'eligius_license_exists' === err_code_of($res));
+
+// P9.2 fixture cleanup (plans + users; license_events cascade above).
+$wpdb->query("DELETE FROM wp_eligius_plans WHERE plan_key IN ('ep-vol', 'ep-free')");
+foreach (array($uC, $uD, $uE) as $u) {
+    $wpdb->query("DELETE FROM wp_eligius_device_transfers WHERE user_id = $u");
+    $wpdb->query("DELETE FROM wp_eligius_license_events WHERE license_id IN (SELECT id FROM (SELECT id FROM wp_eligius_licenses WHERE user_id = $u) t)");
+    $wpdb->query("DELETE FROM wp_eligius_licenses WHERE user_id = $u");
+    $wpdb->query("DELETE FROM wp_eligius_devices WHERE user_id = $u");
+}
+
 // =============== Device routes (6) ============================================
 
 // 8. POST /devices/register
@@ -275,6 +419,11 @@ add_filter('eligius_sub_payment_gateway_instance', function () {
     return new \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway();
 }, 10, 0);
 clear_rl(array(array('payment_callback_ip', '127.0.0.1', 300), array('payment_callback_authority', 'P6-AUTH-A', 600)));
+// Fixture hygiene (P9.2 note): the block needs a REAL verify→duplicate pair —
+// reset the VERIFIED fixture row to INITIATED and drop leftover idempotency
+// rows from previous suite runs (the processor treats either as a duplicate).
+$wpdb->update('wp_eligius_payments', array('status' => 'INITIATED'), array('id' => $paymentA));
+$wpdb->query("DELETE FROM wp_eligius_payment_idempotency WHERE gateway_ref = 'P6-AUTH-A'");
 \Eligius_Sub\Payment\Gateways\Class_Mock_Gateway::reset(true);
 $res1 = dispatch('GET', '/payments/callback/zarinpal', null, array('authority' => 'P6-AUTH-A', 'Status' => 'OK'));
 $res2 = dispatch('GET', '/payments/callback/zarinpal', null, array('authority' => 'P6-AUTH-A', 'Status' => 'OK'));
