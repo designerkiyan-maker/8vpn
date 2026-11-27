@@ -162,6 +162,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v3
+        with:
+          # Pin to the version the local suite is green on (8.11.1, matches
+          # main.yml) — bare `gradle` resolves the latest major, which breaks
+          # the AGP config here (this job never passed since the first run).
+          gradle-version: '8.11.1'
       - name: JVM unit tests (models, SMS OTP extraction)
         run: gradle testDebugUnitTest jacocoUnitTestReport --no-daemon --console=plain
       - name: Assemble debug build

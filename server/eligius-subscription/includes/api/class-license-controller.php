@@ -152,13 +152,14 @@ class Class_License_Controller extends Class_Api_Controller {
 
         // Invalid gate response (doc 03 §5.3 — 403 with typed code).
         // P9.2: VOLUME_EXHAUSTED passes through so the client can tell a
-        // consumed quota apart from expiry/device issues.
-        $error = (string) ($result['error'] ?? '');
-        $code  = match ($error) {
+        // consumed quota apart from expiry/device issues. (PHP 7.4-safe —
+        // no match expression; the Plugin CI lints across 7.4+.)
+        static $code_map = [
             'NO_ACTIVE_LICENSE' => 'SUBSCRIPTION_EXPIRED',
             'VOLUME_EXHAUSTED'  => 'VOLUME_EXHAUSTED',
-            default             => 'DEVICE_NOT_BOUND',
-        };
+        ];
+        $error  = (string) ($result['error'] ?? '');
+        $code   = isset($code_map[$error]) ? $code_map[$error] : 'DEVICE_NOT_BOUND';
         $message = 'VOLUME_EXHAUSTED' === $code
             ? 'Volume quota is exhausted for this subscription.'
             : 'License is not valid for this device.';
