@@ -101,6 +101,7 @@ fun HomeScreen(openLogs: () -> Unit) {
     val speed by Engine.speedBps.collectAsStateWithLifecycle()
     val totalRx by Engine.totalRx.collectAsStateWithLifecycle()
     val totalTx by Engine.totalTx.collectAsStateWithLifecycle()
+    val finishedSessionBytes by Engine.finishedSessionBytes.collectAsStateWithLifecycle()
     val lastSession by Engine.lastSession.collectAsStateWithLifecycle()
     val netType by Engine.networkType.collectAsStateWithLifecycle()
 
@@ -263,9 +264,13 @@ fun HomeScreen(openLogs: () -> Unit) {
         }
 
         // ---- P9.2: active subscription card (plan, Shamsi expiry, usage bar;
-        // liveBytes keeps the card moving during a connected session)
+        // live session bytes while connected, finished-session carry-over after
+        // disconnect — the report response replaces both with server truth)
         Spacer(Modifier.height(16.dp))
-        SubscriptionCard(licenseState, liveBytes = if (live) totalRx + totalTx else 0L)
+        SubscriptionCard(
+            licenseState,
+            liveBytes = if (live) totalRx + totalTx else finishedSessionBytes
+        )
 
         // ---- Last / Current Connection Info Card (persists after disconnect)
         Spacer(Modifier.height(16.dp))

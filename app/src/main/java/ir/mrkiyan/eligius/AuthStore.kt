@@ -41,6 +41,17 @@ object AuthStore {
     /** Lifetime usage as stored in the WordPress database (server-authoritative). */
     data class UsageServer(val rxBytes: Long, val txBytes: Long, val durationMs: Long, val sessions: Int)
 
+    /** P9.2.1: session-report result — the period stats PLUS the fresh quota
+     *  fields, so the tunnel can refresh the subscription card immediately
+     *  after a disconnect (owner bug report: stale card until app restart). */
+    data class UsageReportResult(
+        val usage: UsageServer,
+        val usedBytes: Long,
+        val volumeTotalBytes: Long?,
+        val volumePercent: Int?,
+        val volumeExhausted: Boolean,
+    )
+
     /** Full profile as reported by /wp-json/wp/v2/users/me (null = not fetched / form session). */
     data class Profile(
         val id: Long,
@@ -162,7 +173,7 @@ object AuthStore {
     }
 
     /** Reports one finished session; the server accumulates it into lifetime usage. */
-    suspend fun reportUsage(rx: Long, tx: Long, durationMs: Long): Result<UsageServer> =
+    suspend fun reportUsage(rx: Long, tx: Long, durationMs: Long): Result<UsageReportResult> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val token = flow.value?.token ?: error("no JWT session")
@@ -193,12 +204,24 @@ object AuthStore {
                     // P9.2.1: PER-SUBSCRIPTION-PERIOD stats (owner decision —
                     // resets on a new purchase; server row starts at zero).
                     val d = j.optJSONObject("data") ?: JSONObject()
-                    UsageServer(
+                    val usage = UsageServer(
                         rxBytes = d.optLong("used_rx_bytes"),
                         txBytes = d.optLong("used_tx_bytes"),
                         durationMs = d.optLong("used_duration_ms"),
                         sessions = d.optInt("used_sessions"),
                     ).also { usageServer.value = it }
+                    // P9.2.1 (owner bug report): the quota fields ride along so
+                    // the tunnel can refresh the subscription card right after
+                    // a session report — no restart needed for fresh numbers.
+                    UsageReportResult(
+                        usage = usage,
+                        usedBytes = d.optLong("used_bytes"),
+                        volumeTotalBytes = if (d.has("volume_total_bytes") && !d.isNull("volume_total_bytes"))
+                            d.optLong("volume_total_bytes") else null,
+                        volumePercent = if (d.has("volume_percent") && !d.isNull("volume_percent"))
+                            d.optInt("volume_percent") else null,
+                        volumeExhausted = d.optBoolean("volume_exhausted", false),
+                    )
                 } finally {
                     con.disconnect()
                 }

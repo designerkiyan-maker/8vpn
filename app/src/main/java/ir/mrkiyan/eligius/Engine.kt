@@ -83,7 +83,18 @@ object Engine {
             totalRx.value = 0
             totalTx.value = 0
         }
+        // NOTE (P9.2.1): finishedSessionBytes is NOT cleared here — it keeps
+        // the last session visible until the server report lands
+        // (LicenseStore.updateVolumeFromReport clears it, avoiding double-count).
     }
+
+    /**
+     * P9.2.1 (owner bug report): bytes of the JUST-FINISHED session, kept on
+     * display after a disconnect so the subscription card never regresses to
+     * the pre-connection value. Cleared when the server report lands
+     * (LicenseStore.updateVolumeFromReport) or at the next session start.
+     */
+    val finishedSessionBytes = MutableStateFlow(0L)
 
     /** Persists the finished session so the home card keeps showing it after disconnect. */
     fun saveLastSession(): LastSession? {

@@ -262,9 +262,22 @@ class TunnelService : VpnService() {
         // one report feeds BOTH the quota accountant and the Account usage
         // card — a fresh purchase row starts at zero, so the card resets.
         // JWT sessions only; form-login sessions stay local. Best effort.
+        // P9.2.1 (owner bug report): the report runs on an APP-lifetime scope
+        // (the service scope dies at stopSelf) and its fresh quota fields
+        // refresh the subscription card right away — no restart needed. The
+        // finished session's bytes stay on the card until the report lands.
         if (saved != null && AuthStore.flow.value?.token != null) {
-            scope.launch {
-                runCatching { AuthStore.reportUsage(saved.rxBytes, saved.txBytes, saved.durationMs) }
+            Engine.finishedSessionBytes.value = saved.rxBytes + saved.txBytes
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching {
+                    val r = AuthStore.reportUsage(saved.rxBytes, saved.txBytes, saved.durationMs)
+                    r.getOrNull()?.let { result ->
+                        LicenseStore.updateVolumeFromReport(
+                            result.usedBytes, result.volumeTotalBytes,
+                            result.volumePercent, result.volumeExhausted
+                        )
+                    }
+                }
             }
         }
         Engine.paused.value = false

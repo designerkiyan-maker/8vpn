@@ -290,6 +290,26 @@ object LicenseStore {
         lastCheckedAt.value = 0L
     }
 
+    /**
+     * P9.2.1 (owner bug report): refresh the cached state's quota fields from
+     * a session-report response — the subscription card shows fresh numbers
+     * immediately after a disconnect instead of waiting for the next
+     * ensureValid (which does not run while the tunnel is down).
+     */
+    fun updateVolumeFromReport(usedBytes: Long, totalBytes: Long?, percent: Int?, exhausted: Boolean) {
+        val cached = licenseState.value ?: return
+        if (!cached.valid) return
+        licenseState.value = cached.copy(
+            volumeUsedBytes = usedBytes.coerceAtLeast(0),
+            volumeTotalBytes = totalBytes,
+            volumePercent = percent,
+            volumeExhausted = exhausted
+        )
+        // The server now includes the finished session — the carry-over must
+        // go or the card would double-count it.
+        Engine.finishedSessionBytes.value = 0L
+    }
+
     /** Logout/revocation cleanup. */
     fun clearAll(ctx: Context) {
         licenseState.value = null
