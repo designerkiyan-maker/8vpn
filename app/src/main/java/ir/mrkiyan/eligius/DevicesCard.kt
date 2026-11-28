@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import ir.mrkiyan.eligius.api.RetrofitClient
 import kotlinx.coroutines.launch
 
@@ -37,6 +39,11 @@ import kotlinx.coroutines.launch
  *  • an active device can start a transfer TO another registered device —
  *    the OTP entry then appears on the destination (server-reported
  *    pending transfer), never on the initiating device.
+ *
+ * P9.2.1 (owner live-test feedback):
+ *  • BOTH transfer buttons arm a CONFIRMATION dialog — an accidental tap
+ *    starts an SMS flow and flips the active device;
+ *  • each device shows the phone model (label) with its serial underneath.
  */
 @Composable
 fun DevicesCard() {
@@ -54,6 +61,10 @@ fun DevicesCard() {
     var transferId by remember { mutableStateOf<Long?>(null) }
     var otpInput by remember { mutableStateOf("") }
     var transferBusy by remember { mutableStateOf(false) }
+    // P9.2.1 (owner request): BOTH transfer buttons arm a confirmation — an
+    // accidental tap starts an SMS flow and flips the active device.
+    var confirmTransferFrom by remember { mutableStateOf(false) }
+    var confirmTransferToNew by remember { mutableStateOf(false) }
 
     suspend fun loadDevices() {
         loading = true
@@ -94,8 +105,7 @@ fun DevicesCard() {
         Text(
             "دستگاه‌ها",
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = c.primary
+            fontWeight = FontWeight.Bold
         )
         Text(
             "هر حساب فقط روی یک دستگاه فعال است. انتقال با کد پیامکی انجام می‌شود.",
@@ -120,6 +130,14 @@ fun DevicesCard() {
                         (d.label?.takeIf { it.isNotBlank() } ?: "دستگاه") + if (isThisDevice) " (این دستگاه)" else "",
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                     )
+                    // P9.2.1 (owner request): the device serial under the model.
+                    Text(
+                        "سریال: " + (if (isThisDevice) DeviceIdentity.getSerial(ctx) else d.deviceHash.takeLast(12)),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        color = c.onSurfaceVariant
+                    )
                     Text(
                         when {
                             isActive && isThisDevice -> "دستگاه فعال"
@@ -133,7 +151,31 @@ fun DevicesCard() {
                 }
                 if (!isActive && isThisDevice) {
                     // Phase 5: transfer-from-NEW-device — the owner's confirmed flow.
+                    // P9.2.1: confirm first (accidental taps start an SMS flow).
+                    TextButton(onClick = { confirmTransferToNew = true }) {
+                        Text(if (transferBusy) "..." else "انتقال اشتراک به این دستگاه")
+                    }
+                }
+                if (isActive) {
+                    TextButton(onClick = { confirmTransferFrom = true }) {
+                        Text(if (transferBusy) "..." else "انتقال")
+                    }
+                }
+            }
+        }
+
+        // ---- P9.2.1: transfer confirmations (owner request) — the actual
+        // flows run only after the owner confirms.
+        if (confirmTransferToNew) {
+            AlertDialog(
+                onDismissRequest = { confirmTransferToNew = false },
+                title = { Text("تأیید انتقال اشتراک", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text("این دستگاه غیرفعال است و اشتراک به آن منتقل می‌شود؛ دستگاه فعلی غیرفعال خواهد شد و کد تأیید با پیامک ارسال می‌شود.\n\nادامه می‌دهید؟")
+                },
+                confirmButton = {
                     TextButton(onClick = {
+                        confirmTransferToNew = false
                         scope.launch {
                             transferBusy = true
                             message = null
@@ -149,16 +191,29 @@ fun DevicesCard() {
                             }.onFailure { message = "خطای شبکه: ${it.message}" }
                             transferBusy = false
                         }
-                    }) { Text(if (transferBusy) "..." else "انتقال اشتراک به این دستگاه") }
+                    }) { Text("بله، ادامه", fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmTransferToNew = false }) { Text("انصراف") }
                 }
-                if (isActive) {
+            )
+        }
+        if (confirmTransferFrom) {
+            AlertDialog(
+                onDismissRequest = { confirmTransferFrom = false },
+                title = { Text("تأیید انتقال اشتراک", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text("اشتراک به دستگاه دیگری منتقل می‌شود؛ کد تأیید باید روی دستگاه جدید وارد شود و دستگاه فعلی غیرفعال خواهد شد. کد تأیید با پیامک ارسال می‌شود.\n\nادامه می‌دهید؟")
+                },
+                confirmButton = {
                     TextButton(onClick = {
+                        confirmTransferFrom = false
                         scope.launch {
                             transferBusy = true
                             message = null
                             runCatching {
                                 val hash = DeviceIdentity.getDeviceHash(ctx)
-                                val target = devices.firstOrNull { !it.isActive && it.deviceId != d.deviceId }
+                                val target = devices.firstOrNull { !it.isActive && it.deviceId != activeDeviceId }
                                 if (target == null) {
                                     message = "دستگاه دیگری برای انتقال ثبت نشده است. ابتدا برنامه را روی دستگاه جدید نصب و وارد کنید."
                                 } else {
@@ -183,9 +238,12 @@ fun DevicesCard() {
                             }.onFailure { message = "خطای شبکه: " + (it.message ?: "") }
                             transferBusy = false
                         }
-                    }) { Text(if (transferBusy) "..." else "انتقال") }
+                    }) { Text("بله، ادامه", fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmTransferFrom = false }) { Text("انصراف") }
                 }
-            }
+            )
         }
 
         if (transferId != null) {

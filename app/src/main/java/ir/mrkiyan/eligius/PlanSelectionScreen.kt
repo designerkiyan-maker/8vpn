@@ -14,12 +14,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +58,64 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
     var buying by remember { mutableStateOf(false) }
     var buyError by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // P9.2.1 (owner request): confirm BEFORE any purchase/free activation —
+    // an accidental tap must not start a payment or consume the one-shot free plan.
+    var confirmPlan by remember { mutableStateOf<ir.mrkiyan.eligius.api.model.PlanData?>(null) }
+    var activatingKey by remember { mutableStateOf<String?>(null) }
+    var activatedKey by remember { mutableStateOf<String?>(null) }
+
+    fun doBuy(plan: ir.mrkiyan.eligius.api.model.PlanData) {
+        buying = true
+        scope.launch {
+            runCatching {
+                val response = RetrofitClient.paymentApi.createPayment(
+                    mapOf(
+                        "plan_key" to plan.planKey,
+                        "gateway" to "zarinpal"
+                    )
+                )
+                if (response.isSuccessful) {
+                    val data = response.body()?.data
+                    val redirect = data?.redirectUrl ?: ""
+                    if (redirect.isNotBlank()) {
+                        buyError = null
+                        // Open the gateway payment page in the browser.
+                        ctx.startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(redirect)
+                            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } else {
+                        buyError = "درگاه پرداخت پاسخ معتبر نداد."
+                    }
+                } else {
+                    buyError = RetrofitClient.errorMessage(response) ?: "خطا در ایجاد پرداخت"
+                }
+            }.onFailure { buyError = "خطای شبکه: ${it.message}" }
+            buying = false
+        }
+    }
+
+    fun doActivate(plan: ir.mrkiyan.eligius.api.model.PlanData) {
+        activatingKey = plan.planKey
+        scope.launch {
+            runCatching {
+                val response = RetrofitClient.licenseApi.activateFree(
+                    mapOf("plan_key" to plan.planKey)
+                )
+                if (response.isSuccessful && response.body()?.data != null) {
+                    LicenseStore.invalidateCache()
+                    activatedKey = plan.planKey
+                    buyError = null
+                } else {
+                    buyError = RetrofitClient.errorMessage(response)
+                        ?: "خطا در فعال‌سازی پلن رایگان"
+                }
+            }.onFailure { buyError = "خطای شبکه: ${it.message}" }
+            activatingKey = null
+        }
+    }
 
     LaunchedEffect(Unit) {
         runCatching {
@@ -76,7 +136,7 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "بازگشت")
+                Icon8(Ico.BACK, MaterialTheme.colorScheme.onSurface)
             }
             Text("انتخاب اشتراک", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         }
@@ -105,8 +165,8 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                             "${plan.volumeGb} گیگ"
                         else -> "نامحدود"
                     }
-                    var activating by remember { mutableStateOf(false) }
-                    var activated by remember { mutableStateOf(false) }
+                    val activating = activatingKey == plan.planKey
+                    val activated = activatedKey == plan.planKey
                     Card(
                         Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
@@ -156,25 +216,7 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                                 if (isFree) {
                                     Button(
                                         enabled = !activating && !activated,
-                                        onClick = {
-                                            activating = true
-                                            scope.launch {
-                                                runCatching {
-                                                    val response = RetrofitClient.licenseApi.activateFree(
-                                                        mapOf("plan_key" to plan.planKey)
-                                                    )
-                                                    if (response.isSuccessful && response.body()?.data != null) {
-                                                        LicenseStore.invalidateCache()
-                                                        activated = true
-                                                        buyError = null
-                                                    } else {
-                                                        buyError = RetrofitClient.errorMessage(response)
-                                                            ?: "خطا در فعال‌سازی پلن رایگان"
-                                                    }
-                                                }.onFailure { buyError = "خطای شبکه: ${it.message}" }
-                                                activating = false
-                                            }
-                                        }
+                                        onClick = { confirmPlan = plan }   // confirm first (owner request)
                                     ) {
                                         Text(
                                             when {
@@ -187,38 +229,7 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                                 } else {
                                     Button(
                                         enabled = plan.priceIrt > 0 && !buying,
-                                        onClick = {
-                                            buying = true
-                                            scope.launch {
-                                                runCatching {
-                                                    val response = RetrofitClient.paymentApi.createPayment(
-                                                        mapOf(
-                                                            "plan_key" to plan.planKey,
-                                                            "gateway" to "zarinpal"
-                                                        )
-                                                    )
-                                                    if (response.isSuccessful) {
-                                                        val data = response.body()?.data
-                                                        val redirect = data?.redirectUrl ?: ""
-                                                        if (redirect.isNotBlank()) {
-                                                            buyError = null
-                                                            // Open the gateway payment page in the browser.
-                                                            ctx.startActivity(
-                                                                android.content.Intent(
-                                                                    android.content.Intent.ACTION_VIEW,
-                                                                    android.net.Uri.parse(redirect)
-                                                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                                            )
-                                                        } else {
-                                                            buyError = "درگاه پرداخت پاسخ معتبر نداد."
-                                                        }
-                                                    } else {
-                                                        buyError = RetrofitClient.errorMessage(response) ?: "خطا در ایجاد پرداخت"
-                                                    }
-                                                }.onFailure { buyError = "خطای شبکه: ${it.message}" }
-                                                buying = false
-                                            }
-                                        }
+                                        onClick = { confirmPlan = plan }   // confirm first (owner request)
                                     ) {
                                         Text(if (buying) "..." else "خرید")
                                     }
@@ -257,5 +268,42 @@ fun PlanSelectionScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    // P9.2.1: purchase/activation confirmation (owner request)
+    confirmPlan?.let { plan ->
+        val isFree = plan.planType == "free"
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmPlan = null },
+            title = {
+                Text(
+                    if (isFree) "فعال‌سازی پلن رایگان" else "تأیید خرید",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    if (isFree)
+                        "پلن «${plan.label}» — ${plan.durationDays} روز" +
+                            (plan.volumeGb?.let { " — $it گیگابایت" } ?: "") +
+                            "\n\nروی حساب شما فعال شود؟ فعال‌سازی پلن رایگان برای هر حساب فقط یک‌بار ممکن است."
+                    else
+                        "پلن «${plan.label}» — ${plan.durationDays} روز" +
+                            (plan.volumeGb?.let { " — $it گیگابایت" } ?: "") +
+                            "\n\nمبلغ: ${plan.priceIrt / 10} تومان" +
+                            (if (plan.discountPercent > 0) " (با ${plan.discountPercent}٪ تخفیف)" else "") +
+                            "\n\nبرای پرداخت به درگاه منتقل می‌شوید. ادامه می‌دهید؟"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmPlan = null
+                    if (isFree) doActivate(plan) else doBuy(plan)
+                }) { Text("بله، ادامه", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmPlan = null }) { Text("انصراف") }
+            }
+        )
     }
 }

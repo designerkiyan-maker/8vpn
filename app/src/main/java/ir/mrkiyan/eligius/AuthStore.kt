@@ -619,7 +619,7 @@ object AuthStore {
             //     happens exclusively via the OTP transfer verify. When the
             //     register is refused, the pre-P5 LimitReached guidance is
             //     preserved as the fallback.
-            val registered = registerDevice("Android")
+            val registered = registerDevice(DeviceIdentity.getDeviceModel())
             if (registered.isFailure) {
                 deviceBinding.value = if (activeId > 0L) {
                     DeviceBindingState.LimitReached(activeId)
@@ -656,7 +656,7 @@ object AuthStore {
      * device is activated exclusively via the OTP transfer verify. An
      * inactive row with a FREE slot is re-activated (admin-release recovery).
      */
-    suspend fun registerDevice(label: String = "Android"): Result<String> =
+    suspend fun registerDevice(label: String = DeviceIdentity.getDeviceModel()): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val ctx = appContext ?: error("AuthStore.init(context) not called")
@@ -708,7 +708,10 @@ object AuthStore {
                 mapOf(
                     "device_hash" to deviceHash,
                     "challenge" to challenge,
-                    "signature" to signature
+                    "signature" to signature,
+                    // P9.2.1 (owner request): keep the server label fresh with
+                    // the real phone model (older rows registered as "Android").
+                    "label" to DeviceIdentity.getDeviceModel()
                 )
             )
             if (!verResponse.isSuccessful) {

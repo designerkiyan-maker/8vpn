@@ -46,6 +46,17 @@ object DeviceIdentity {
         return sha256Hex(input)
     }
 
+    /** P9.2.1 (owner request): human-readable device label = phone model
+     *  (manufacturer + model), registered on the server instead of "Android". */
+    fun getDeviceModel(): String =
+        listOf(android.os.Build.MANUFACTURER, android.os.Build.MODEL)
+            .filter { it.isNotBlank() }.distinct().joinToString(" ").trim()
+            .ifBlank { "Android" }
+
+    /** P9.2.1 (owner request): the device "serial" shown under the model on
+     *  the devices card — the stable ANDROID_ID already used in device_hash. */
+    fun getSerial(context: Context): String = getAndroidId(context)
+
     /** Public key as a PEM "PUBLIC KEY" block (SubjectPublicKeyInfo DER). */
     fun getPublicKeyPem(context: Context): String {
         val keyPair = getOrCreateKeyPair(context)

@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -45,14 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
@@ -63,100 +58,50 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ───────────────────────── Icons (drawn, no extra dependency) ─────────────────────────
+// ───────────────────────── Icons (Solar set — 480 Design, via Iconify) ─────────────────────────
 
 enum class Ico {
     BACK, SETTINGS, LOGS, POWER, CHECK, CHEVRON, LOCK, DOWN, UP, BOLT, GLOBE, REFRESH,
     COPY, SHARE, TRASH, INFO, CODE, SEND, PAUSE, PLAY, USER
 }
 
+/** Ico → bundled Solar VectorDrawable (owner directive: Solar icons everywhere). */
+private val IcoSolarRes = mapOf(
+    Ico.BACK to R.drawable.solar_back,
+    Ico.SETTINGS to R.drawable.solar_settings,
+    Ico.LOGS to R.drawable.solar_logs,
+    Ico.POWER to R.drawable.solar_power,
+    Ico.CHECK to R.drawable.solar_check,
+    Ico.CHEVRON to R.drawable.solar_chevron,
+    Ico.LOCK to R.drawable.solar_lock,
+    Ico.DOWN to R.drawable.solar_down,
+    Ico.UP to R.drawable.solar_up,
+    Ico.BOLT to R.drawable.solar_bolt,
+    Ico.GLOBE to R.drawable.solar_globe,
+    Ico.REFRESH to R.drawable.solar_refresh,
+    Ico.COPY to R.drawable.solar_copy,
+    Ico.SHARE to R.drawable.solar_share,
+    Ico.TRASH to R.drawable.solar_trash,
+    Ico.INFO to R.drawable.solar_info,
+    Ico.CODE to R.drawable.solar_code,
+    Ico.SEND to R.drawable.solar_send,
+    Ico.PAUSE to R.drawable.solar_pause,
+    Ico.PLAY to R.drawable.solar_play,
+    Ico.USER to R.drawable.solar_user,
+)
+
 @Composable
 fun Icon8(ico: Ico, tint: Color, sz: Dp = 22.dp, modifier: Modifier = Modifier, strokeW: Float = 2f) {
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    Canvas(modifier.size(sz)) {
-        val u = this.size.width / 24f
-        val flip = rtl && (ico == Ico.BACK)
-        fun p(x: Float, y: Float) = Offset((if (flip) 24f - x else x) * u, y * u)
-        val st = Stroke(width = strokeW * u, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
-            drawLine(tint, p(x1, y1), p(x2, y2), strokeWidth = strokeW * u, cap = StrokeCap.Round)
-        fun poly(close: Boolean, vararg pts: Float) {
-            val path = Path()
-            path.moveTo(p(pts[0], pts[1]).x, p(pts[0], pts[1]).y)
-            var i = 2
-            while (i < pts.size) {
-                path.lineTo(p(pts[i], pts[i + 1]).x, p(pts[i], pts[i + 1]).y)
-                i += 2
-            }
-            if (close) path.close()
-            drawPath(path, tint, style = st)
-        }
-        when (ico) {
-            Ico.BACK -> { line(20f, 12f, 5f, 12f); poly(false, 11f, 6f, 5f, 12f, 11f, 18f) }
-            Ico.SETTINGS -> {
-                line(4f, 7f, 20f, 7f); line(4f, 12f, 20f, 12f); line(4f, 17f, 20f, 17f)
-                drawCircle(tint, radius = 2.6f * u, center = p(9f, 7f))
-                drawCircle(tint, radius = 2.6f * u, center = p(15f, 12f))
-                drawCircle(tint, radius = 2.6f * u, center = p(8f, 17f))
-            }
-            Ico.LOGS -> {
-                drawRoundRect(tint, topLeft = p(5f, 3.5f), size = Size(14f * u, 17f * u), cornerRadius = CornerRadius(3.5f * u), style = st)
-                line(8.5f, 9f, 15.5f, 9f); line(8.5f, 13f, 15.5f, 13f); line(8.5f, 17f, 12.5f, 17f)
-            }
-            Ico.POWER -> {
-                drawArc(tint, startAngle = -55f, sweepAngle = 290f, useCenter = false, topLeft = p(4.5f, 5.5f), size = Size(15f * u, 15f * u), style = st)
-                line(12f, 3f, 12f, 12f)
-            }
-            Ico.CHECK -> poly(false, 5f, 12.5f, 10f, 17f, 19f, 7f)
-            Ico.CHEVRON -> poly(false, 6f, 9f, 12f, 15f, 18f, 9f)
-            Ico.LOCK -> {
-                drawRoundRect(tint, topLeft = p(5.5f, 11f), size = Size(13f * u, 9.5f * u), cornerRadius = CornerRadius(3f * u), style = st)
-                drawArc(tint, startAngle = 180f, sweepAngle = 180f, useCenter = false, topLeft = p(8.5f, 4.5f), size = Size(7f * u, 7f * u), style = st)
-                line(8.5f, 8f, 8.5f, 11f); line(15.5f, 8f, 15.5f, 11f)
-            }
-            Ico.DOWN -> { line(12f, 4f, 12f, 16f); poly(false, 6f, 11f, 12f, 17f, 18f, 11f); line(5f, 21f, 19f, 21f) }
-            Ico.UP -> { line(12f, 20f, 12f, 8f); poly(false, 6f, 13f, 12f, 7f, 18f, 13f); line(5f, 3f, 19f, 3f) }
-            Ico.BOLT -> poly(true, 13f, 3f, 5f, 13.5f, 11f, 13.5f, 10f, 21f, 19f, 10f, 13f, 10f)
-            Ico.USER -> {
-                drawCircle(tint, radius = 3.2f * u, center = p(12f, 8.2f), style = st)
-                drawArc(tint, startAngle = 175f, sweepAngle = 190f, useCenter = false, topLeft = p(5.5f, 12.8f), size = Size(13f * u, 12f * u), style = st)
-            }
-            Ico.GLOBE -> {
-                drawCircle(tint, radius = 9f * u, center = p(12f, 12f), style = st)
-                drawOval(tint, topLeft = p(8f, 3f), size = Size(8f * u, 18f * u), style = st)
-                line(3f, 12f, 21f, 12f)
-            }
-            Ico.REFRESH -> {
-                drawArc(tint, startAngle = 0f, sweepAngle = 270f, useCenter = false, topLeft = p(4.5f, 5.5f), size = Size(15f * u, 15f * u), style = st)
-                poly(false, 8.5f, 2.5f, 12f, 5.5f, 8.5f, 8.5f)
-            }
-            Ico.COPY -> {
-                drawRoundRect(tint, topLeft = p(8.5f, 8.5f), size = Size(11f * u, 11f * u), cornerRadius = CornerRadius(2.5f * u), style = st)
-                poly(false, 15f, 5f, 5f, 5f, 5f, 15f, 8f, 15f)
-            }
-            Ico.SHARE -> {
-                drawCircle(tint, radius = 2.6f * u, center = p(6f, 12f), style = st)
-                drawCircle(tint, radius = 2.6f * u, center = p(18f, 6f), style = st)
-                drawCircle(tint, radius = 2.6f * u, center = p(18f, 18f), style = st)
-                line(8.2f, 10.8f, 15.8f, 7.2f); line(8.2f, 13.2f, 15.8f, 16.8f)
-            }
-            Ico.TRASH -> {
-                line(4f, 7f, 20f, 7f)
-                poly(false, 6f, 7f, 7f, 20f, 17f, 20f, 18f, 7f)
-                poly(false, 9f, 7f, 9f, 4f, 15f, 4f, 15f, 7f)
-                line(10f, 11f, 10f, 16f); line(14f, 11f, 14f, 16f)
-            }
-            Ico.INFO -> {
-                drawCircle(tint, radius = 9f * u, center = p(12f, 12f), style = st)
-                drawCircle(tint, radius = 1.2f * u, center = p(12f, 7.8f))
-                line(12f, 11.5f, 12f, 16.5f)
-            }
-            Ico.CODE -> { poly(false, 8f, 7f, 3f, 12f, 8f, 17f); poly(false, 16f, 7f, 21f, 12f, 16f, 17f); line(13.5f, 5f, 10.5f, 19f) }
-            Ico.PAUSE -> { line(9f, 5f, 9f, 19f); line(15f, 5f, 15f, 19f) }
-            Ico.PLAY -> poly(true, 8f, 5f, 19f, 12f, 8f, 19f)
-            Ico.SEND -> { poly(true, 21f, 3f, 3f, 10.5f, 10f, 13f, 13f, 20f); line(10f, 13f, 21f, 3f) }
-        }
-    }
+    val flip = rtl && ico == Ico.BACK
+    Icon(
+        painter = painterResource(IcoSolarRes[ico] ?: R.drawable.solar_info),
+        contentDescription = null,
+        tint = tint,
+        modifier = modifier
+            .size(sz)
+            .let { if (flip) it.graphicsLayer(scaleX = -1f) else it }
+    )
 }
 
 @Composable

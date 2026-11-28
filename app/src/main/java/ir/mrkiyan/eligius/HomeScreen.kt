@@ -513,26 +513,34 @@ private fun InfoColumn(
 @Composable
 fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
     if (state == null || !state.valid || state.offline) return
-    val days = state.expiresAt?.let {
-        runCatching {
-            java.time.Duration.between(
-                java.time.Instant.now(),
-                java.time.Instant.parse(it)
-            ).toDays()
-        }.getOrDefault(-1L)
+    // P9.2.1 (owner bug report): expiresAt is the server DATETIME
+    // "yyyy-MM-dd HH:mm:ss" — Instant.parse threw on EVERY response, so the
+    // days computation always failed (-1) and the banner permanently claimed
+    // "اشتراک شما امروز منقضی می‌شود". Tolerant parse + a real red style
+    // only when it is genuinely the last day.
+    val days = state.expiresAt?.let { exp ->
+        val ms = runCatching { java.time.Instant.parse(exp).toEpochMilli() }.getOrElse {
+            runCatching {
+                java.time.LocalDateTime.parse(exp.replace(' ', 'T'))
+                    .toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
+            }.getOrNull()
+        } ?: return
+        java.time.Duration.between(java.time.Instant.now(), java.time.Instant.ofEpochMilli(ms)).toDays()
     } ?: return
     if (days > 7) return
     val text = when {
         days <= 0L -> "اشتراک شما امروز منقضی می‌شود"
         days == 1L -> "اشتراک شما فردا منقضی می‌شود"
-        else -> "$days روز تا پایان اشتراک"
+        else -> JalaliDate.toFaDigits(days.toString()) + " روز تا پایان اشتراک"
     }
+    val urgent = days <= 0L
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .background(
-                MaterialTheme.colorScheme.tertiaryContainer,
+                if (urgent) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.tertiaryContainer,
                 RoundedCornerShape(12.dp)
             )
             .padding(12.dp)
@@ -540,7 +548,8 @@ fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
         Text(
             text,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer
+            color = if (urgent) MaterialTheme.colorScheme.onErrorContainer
+            else MaterialTheme.colorScheme.onTertiaryContainer
         )
     }
 }

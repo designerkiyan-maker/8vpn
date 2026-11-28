@@ -420,6 +420,17 @@ class Class_Device_Controller extends Class_Api_Controller {
             return self::fail_wp_error($result);
         }
 
+        // P9.2.1 (owner request): keep the device label fresh with the real
+        // phone model — legacy rows registered as "Android" get renamed on
+        // the next successful verify.
+        $label = sanitize_text_field((string) $request->get_param('label'));
+        if ('' !== $label && $label !== (string) $device->label) {
+            \Eligius_Sub\Core\Class_Device_Repository::update_row(
+                ['label' => mb_substr($label, 0, 64)],
+                ['id' => (int) $device->id]
+            );
+        }
+
         return self::ok($result);
     }
 
