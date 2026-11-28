@@ -76,10 +76,12 @@ class Class_License_Controller extends Class_Api_Controller {
             'permission_callback' => [self::class, 'permission_user_global'],
         ]);
 
-        // POST /licenses/usage (P9.2 — monotonic quota accounting).
+        // GET+POST /licenses/usage — ONE registration for both methods (WP
+        // overwrites same-URI registrations, so a second register_rest_route
+        // call would silently drop the first method — learned the hard way).
         register_rest_route(self::NAMESPACE_V1, '/licenses/usage', [
-            'methods'             => 'POST',
-            'callback'            => [$this, 'route_usage'],
+            'methods'             => ['GET', 'POST'],
+            'callback'            => [$this, 'route_usage_dispatch'],
             'permission_callback' => [self::class, 'permission_user_global'],
         ]);
 
@@ -263,6 +265,55 @@ class Class_License_Controller extends Class_Api_Controller {
         return self::ok($result, 201);
     }
 
+    /** GET+POST share ONE registration — dispatch on the HTTP method. */
+    public function route_usage_dispatch(\WP_REST_Request $request) {
+        return 'GET' === $request->get_method()
+            ? $this->route_usage_get($request)
+            : $this->route_usage($request);
+    }
+
+    /**
+     * GET /licenses/usage — P9.2.1 per-subscription-period stats for the
+     * Account usage card. Read-only: answers 200 while the limiter is
+     * degraded (FC-RO discipline, same as /licenses/status).
+     */
+    public function route_usage_get(\WP_REST_Request $request) {
+        $license = \Eligius_Sub\Core\Class_License_Repository::get_current(get_current_user_id());
+        if (!$license) {
+            return self::ok($this->usage_payload(null, 0, 0, 0, 0, 0, false));
+        }
+        return self::ok($this->usage_payload(
+            $license,
+            (int) ($license->used_bytes ?? 0),
+            (int) ($license->used_rx_bytes ?? 0),
+            (int) ($license->used_tx_bytes ?? 0),
+            (int) ($license->used_duration_ms ?? 0),
+            (int) ($license->used_sessions ?? 0),
+            true
+        ));
+    }
+
+    /** P9.2: usage payload builder (shared by GET + POST). $used is passed
+     *  EXPLICITLY — the caller's license row may be stale after an increment. */
+    private function usage_payload($license, $used, $rx, $tx, $durationMs, $sessions, $attributed) {
+        $used = max(0, (int) $used);
+        $vol = $license
+            ? \Eligius_Sub\License\Class_License_Manager::instance()->volume_fields_for($license->plan_key, $used)
+            : ['volume_total_bytes' => null, 'volume_percent' => null, 'volume_exhausted' => false];
+        return [
+            'attributed'         => (bool) $attributed,
+            'license_id'         => $license ? (int) $license->id : null,
+            'used_bytes'         => $used,
+            'used_rx_bytes'      => max(0, (int) $rx),
+            'used_tx_bytes'      => max(0, (int) $tx),
+            'used_duration_ms'   => max(0, (int) $durationMs),
+            'used_sessions'      => max(0, (int) $sessions),
+            'volume_total_bytes' => $vol['volume_total_bytes'],
+            'volume_percent'     => $vol['volume_percent'],
+            'volume_exhausted'   => (bool) $vol['volume_exhausted'],
+        ];
+    }
+
     /**
      * POST /licenses/usage — P9.2 monotonic quota accounting (client-trusted
      * metering, doc limitation; swap to 3x-ui later). One atomic increment on
@@ -281,31 +332,29 @@ class Class_License_Controller extends Class_Api_Controller {
 
         $rx = (int) $request->get_param('rx_bytes');
         $tx = (int) $request->get_param('tx_bytes');
+        $durationMs = (int) $request->get_param('duration_ms');
+        $sessions = $request->get_param('sessions') !== null ? (int) $request->get_param('sessions') : 1;
 
         $license = \Eligius_Sub\Core\Class_License_Repository::get_current(get_current_user_id());
         if (!$license) {
-            return self::ok([
-                'attributed'         => false,
-                'license_id'         => null,
-                'used_bytes'         => 0,
-                'volume_total_bytes' => null,
-                'volume_percent'     => null,
-                'volume_exhausted'   => false,
-            ]);
+            return self::ok($this->usage_payload(null, 0, 0, 0, 0, 0, false));
         }
 
-        $plan = \Eligius_Sub\License\Class_License_Manager::instance();
         $before = max(0, (int) ($license->used_bytes ?? 0));
-        $used = \Eligius_Sub\Core\Class_License_Repository::increment_used_bytes(
+        $row = \Eligius_Sub\Core\Class_License_Repository::increment_usage(
             (int) $license->id,
-            $rx + $tx
+            $rx,
+            $tx,
+            $durationMs,
+            $sessions
         );
-        if (null === $used) {
+        if (null === $row) {
             return self::fail('eligius_db_error', 'Usage accounting failed.', 500);
         }
+        $used = (int) $row['used_bytes'];
 
         // Quota totals from the plan row (same logic as build_response).
-        $vol = $plan->volume_fields_for($license->plan_key, $used);
+        $vol = \Eligius_Sub\License\Class_License_Manager::instance()->volume_fields_for($license->plan_key, $used);
         $exhausted = (bool) $vol['volume_exhausted'];
 
         // Crossing audit — fire once per license when used crosses the quota.
@@ -328,14 +377,15 @@ class Class_License_Controller extends Class_Api_Controller {
             ]);
         }
 
-        return self::ok([
-            'attributed'         => true,
-            'license_id'         => (int) $license->id,
-            'used_bytes'         => $used,
-            'volume_total_bytes' => $vol['volume_total_bytes'],
-            'volume_percent'     => $vol['volume_percent'],
-            'volume_exhausted'   => $exhausted,
-        ]);
+        return self::ok($this->usage_payload(
+            $license,
+            (int) $row['used_bytes'],
+            (int) $row['used_rx_bytes'],
+            (int) $row['used_tx_bytes'],
+            (int) $row['used_duration_ms'],
+            (int) $row['used_sessions'],
+            true
+        ));
     }
 
     /**

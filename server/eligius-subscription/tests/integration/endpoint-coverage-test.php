@@ -216,18 +216,29 @@ clear_rl(array(
     array('usage_user', $uC, 3600), array('usage_user', $uD, 3600), array('usage_user', $uE, 3600),
     array('free_activate_user', $uD, 3600), array('free_activate_ip', '127.0.0.1', 3600),
 ));
-$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 1000, 'tx_bytes' => 500));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 1000, 'tx_bytes' => 500, 'duration_ms' => 120000));
 $d = $res->get_data()['data'] ?? array();
-T('L8b. usage report → 200 attributed, used accumulates',
+T('L8b. usage report → 200 attributed, used accumulates + period stats',
     200 === $res->get_status() && true === ($d['attributed'] ?? false)
-    && 1500 === (int) ($d['used_bytes'] ?? 0));
+    && 1500 === (int) ($d['used_bytes'] ?? 0)
+    && 120000 === (int) ($d['used_duration_ms'] ?? -1)
+    && 1 === (int) ($d['used_sessions'] ?? -1));
 $usedId = (int) ($d['license_id'] ?? 0);
 T('L8c. used_bytes persisted on the served license row',
     $usedId > 0 && 1500 === (int) $wpdb->get_var($wpdb->prepare(
         "SELECT used_bytes FROM wp_eligius_licenses WHERE id = %d", $usedId)));
-$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 500, 'tx_bytes' => 0));
+$res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => 500, 'tx_bytes' => 0, 'duration_ms' => 60000));
 T('L8d. second report → monotonic accumulation (2000)',
     200 === $res->get_status() && 2000 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));
+$res = dispatch('GET', '/licenses/usage', $hashA);
+$d = $res->get_data()['data'] ?? array();
+T('L8d2. GET usage → period stats (2000 bytes, 180s, 2 sessions)',
+    200 === $res->get_status() && true === ($d['attributed'] ?? false)
+    && 2000 === (int) ($d['used_bytes'] ?? -1)
+    && 1500 === (int) ($d['used_rx_bytes'] ?? -1)
+    && 500 === (int) ($d['used_tx_bytes'] ?? -1)
+    && 180000 === (int) ($d['used_duration_ms'] ?? -1)
+    && 2 === (int) ($d['used_sessions'] ?? -1));
 $res = dispatch('POST', '/licenses/usage', $hashA, array('rx_bytes' => -5, 'tx_bytes' => -5));
 T('L8e. negative deltas → clamped to 0 (never decreases)',
     200 === $res->get_status() && 2000 === (int) ($res->get_data()['data']['used_bytes'] ?? 0));

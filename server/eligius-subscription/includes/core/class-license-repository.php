@@ -97,24 +97,45 @@ class Class_License_Repository extends Class_Repository_Base {
     /**
      * P9.2: monotonic quota accounting — single atomic statement (same
      * discipline as the rate limiter's counter), never decreases.
-     * Returns the new accumulated value, or null when the row vanished.
+     * P9.2.1: also accumulates the per-period stats (rx/tx/duration/sessions)
+     * the Account usage card renders — a fresh purchase row starts at zero.
+     * Returns the new row usage values, or null when the row vanished.
      */
-    public static function increment_used_bytes($license_id, $delta) {
+    public static function increment_usage($license_id, $rx, $tx, $duration_ms = 0, $sessions = 0) {
         global $wpdb;
         $table = self::table();
         $wpdb->query($wpdb->prepare(
-            "UPDATE `{$table}` SET used_bytes = used_bytes + %d, updated_at = %s WHERE id = %d",
-            Class_Volume::clamp_delta($delta),
+            "UPDATE `{$table}` SET
+                used_bytes = used_bytes + %d,
+                used_rx_bytes = used_rx_bytes + %d,
+                used_tx_bytes = used_tx_bytes + %d,
+                used_duration_ms = used_duration_ms + %d,
+                used_sessions = used_sessions + %d,
+                updated_at = %s
+             WHERE id = %d",
+            Class_Volume::clamp_delta((int) $rx + (int) $tx),
+            Class_Volume::clamp_delta($rx),
+            Class_Volume::clamp_delta($tx),
+            max(0, (int) $duration_ms),
+            max(0, (int) $sessions),
             Class_UTC_Time::mysql_utc(),
             (int) $license_id
         ));
         if ('' !== $wpdb->last_error) {
             return null;
         }
-        return (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT used_bytes FROM `{$table}` WHERE id = %d",
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT used_bytes, used_rx_bytes, used_tx_bytes, used_duration_ms, used_sessions
+               FROM `{$table}` WHERE id = %d",
             (int) $license_id
-        ));
+        ), ARRAY_A);
+        return $row ?: null;
+    }
+
+    /** Back-compat shim (older tests call the bytes-only form). */
+    public static function increment_used_bytes($license_id, $delta) {
+        $row = self::increment_usage($license_id, (int) $delta, 0, 0, 0);
+        return null === $row ? null : (int) $row['used_bytes'];
     }
 
     /** Create a license row; returns insert id or 0 on failure. */

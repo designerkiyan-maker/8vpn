@@ -262,9 +262,10 @@ fun HomeScreen(openLogs: () -> Unit) {
             }
         }
 
-        // ---- P9.2: active subscription card (plan, expiry, volume usage bar)
+        // ---- P9.2: active subscription card (plan, Shamsi expiry, usage bar;
+        // liveBytes keeps the card moving during a connected session)
         Spacer(Modifier.height(16.dp))
-        SubscriptionCard(licenseState)
+        SubscriptionCard(licenseState, liveBytes = if (live) totalRx + totalTx else 0L)
 
         // ---- Last / Current Connection Info Card (persists after disconnect)
         Spacer(Modifier.height(16.dp))
@@ -540,13 +541,14 @@ fun LicenseExpiryBanner(state: LicenseStore.LicenseState?) {
 }
 
 /**
- * P9.2: active-subscription card — plan label, expiry date and a volume
- * usage bar (server-driven used/total from /licenses/status). Timed plans
- * without a quota show «نامحدود». Rendered only for a backend-verified
- * license (never for the offline-granted state).
+ * P9.2.1: active-subscription card — plan label, SHAMSI expiry date (owner
+ * request) and the volume usage line in MB/GB with Persian digits
+ * (e.g. «۳۲۷ مگابایت از ۲۵ گیگابایت مصرف شده»). `liveBytes` carries the
+ * current session's rx+tx so the card moves while connected (the server
+ * only learns used bytes at session end). Timed plans show «نامحدود».
  */
 @Composable
-fun SubscriptionCard(state: LicenseStore.LicenseState?) {
+fun SubscriptionCard(state: LicenseStore.LicenseState?, liveBytes: Long = 0) {
     if (state == null || !state.valid || state.offline) return
     Column(
         Modifier
@@ -586,10 +588,8 @@ fun SubscriptionCard(state: LicenseStore.LicenseState?) {
                 }.getOrNull()
             }
             if (expMs != null) {
-                val expiryFa = java.time.Instant.ofEpochMilli(expMs)
-                    .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
                 Text(
-                    "تاریخ انقضا: $expiryFa",
+                    "تاریخ انقضا: ${JalaliDate.formatShamsi(expMs)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp)
@@ -598,7 +598,7 @@ fun SubscriptionCard(state: LicenseStore.LicenseState?) {
         }
         val total = state.volumeTotalBytes
         if (total != null && total > 0) {
-            val used = state.volumeUsedBytes.coerceAtLeast(0L)
+            val used = (state.volumeUsedBytes + liveBytes).coerceAtLeast(0L)
             val fraction = ((used.toDouble() / total).coerceIn(0.0, 1.0)).toFloat()
             LinearProgressIndicator(
                 progress = { fraction },
@@ -607,8 +607,15 @@ fun SubscriptionCard(state: LicenseStore.LicenseState?) {
                 else MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
+            // Owner format: used in MB, total in GB — Persian digits.
+            val usedMb = (used + 1_048_576L - 1) / 1_048_576L   // ceil
+            val totalGb = (total + 1_073_741_824L - 1) / 1_073_741_824L
+            val totalText = if (total >= 1_073_741_824L)
+                "${JalaliDate.toFaDigits(totalGb.toString())} گیگابایت"
+            else
+                "${JalaliDate.toFaDigits(((total + 1_048_576L - 1) / 1_048_576L).toString())} مگابایت"
             Text(
-                "${fmtBytes(used)} از ${fmtBytes(total)} (${state.volumePercent ?: 0}٪)",
+                "${JalaliDate.toFaDigits(usedMb.toString())} مگابایت از $totalText مصرف شده",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)

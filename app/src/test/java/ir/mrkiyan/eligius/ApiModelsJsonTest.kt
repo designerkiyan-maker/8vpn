@@ -101,10 +101,16 @@ class ApiModelsJsonTest {
     fun `p92 usage report wire shape`() {
         val d = moshi.adapter(UsageReportData::class.java).fromJson(
             """{"attributed":true,"license_id":42,"used_bytes":1500,
-                "volume_total_bytes":1073741824,"volume_percent":0,"volume_exhausted":false}""")!!
+                "used_rx_bytes":1000,"used_tx_bytes":500,"used_duration_ms":180000,
+                "used_sessions":2,"volume_total_bytes":1073741824,
+                "volume_percent":0,"volume_exhausted":false}""")!!
         assertTrue(d.attributed)
         assertEquals(42L, d.licenseId)
         assertEquals(1500L, d.usedBytes)
+        assertEquals(1000L, d.usedRxBytes)
+        assertEquals(500L, d.usedTxBytes)
+        assertEquals(180000L, d.usedDurationMs)
+        assertEquals(2, d.usedSessions)
         assertFalse(d.volumeExhausted)
     }
 

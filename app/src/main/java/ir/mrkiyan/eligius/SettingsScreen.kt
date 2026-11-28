@@ -213,16 +213,6 @@ fun SettingsScreen(
                 ActionRow(Ico.LOGS, stringResource(R.string.open_logs), onClick = openLogs)
                 ActionRow(Ico.TRASH, stringResource(R.string.clear_cache), enabled = st.phase == Phase.IDLE, danger = true) { confirmClear = true }
             }
-            AppCard {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(stringResource(R.string.license_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Text(stringResource(R.string.license_text), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "github.com/CluvexStudio/Aether\ngithub.com/heiher/hev-socks5-tunnel",
-                        fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
             Spacer(Modifier.height(88.dp))
         }
     }

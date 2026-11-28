@@ -126,11 +126,16 @@ data class PlanListData(
     val plans: List<PlanData> = emptyList()
 )
 
-/** P9.2: response of POST /licenses/usage (monotonic quota accounting). */
+/** P9.2: response of GET/POST /licenses/usage — per-subscription-period
+ *  stats (a fresh purchase row starts at zero → the usage card resets). */
 data class UsageReportData(
     val attributed: Boolean = false,
     @Json(name = "license_id") val licenseId: Long? = null,
     @Json(name = "used_bytes") val usedBytes: Long = 0,
+    @Json(name = "used_rx_bytes") val usedRxBytes: Long = 0,
+    @Json(name = "used_tx_bytes") val usedTxBytes: Long = 0,
+    @Json(name = "used_duration_ms") val usedDurationMs: Long = 0,
+    @Json(name = "used_sessions") val usedSessions: Int = 0,
     @Json(name = "volume_total_bytes") val volumeTotalBytes: Long? = null,
     @Json(name = "volume_percent") val volumePercent: Int? = null,
     @Json(name = "volume_exhausted") val volumeExhausted: Boolean = false

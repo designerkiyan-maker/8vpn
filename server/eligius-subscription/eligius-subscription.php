@@ -16,7 +16,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 define('ELIGIUS_SUB_VERSION', '1.0.0');
-define('ELIGIUS_SUB_DB_VERSION', '1.3.0');
+define('ELIGIUS_SUB_DB_VERSION', '1.4.0');
 define('ELIGIUS_SUB_PLUGIN_FILE', __FILE__);
 define('ELIGIUS_SUB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ELIGIUS_SUB_PLUGIN_URL', plugin_dir_url(__FILE__));

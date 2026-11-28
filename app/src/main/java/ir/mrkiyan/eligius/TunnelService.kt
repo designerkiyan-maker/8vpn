@@ -258,13 +258,13 @@ class TunnelService : VpnService() {
         teardown()
         val saved = Engine.saveLastSession()   // keep duration/totals on the home card after disconnect
         Engine.resetLive()
-        // Server-side lifetime usage: report the finished session for the signed-in
-        // account (JWT sessions only; form-login sessions stay local). Best effort.
-        // P9.2: the same deltas feed the quota accountant (licenses/usage).
+        // Server-side PER-SUBSCRIPTION-PERIOD usage (P9.2.1, owner decision):
+        // one report feeds BOTH the quota accountant and the Account usage
+        // card — a fresh purchase row starts at zero, so the card resets.
+        // JWT sessions only; form-login sessions stay local. Best effort.
         if (saved != null && AuthStore.flow.value?.token != null) {
             scope.launch {
                 runCatching { AuthStore.reportUsage(saved.rxBytes, saved.txBytes, saved.durationMs) }
-                runCatching { AuthStore.reportLicenseUsage(saved.rxBytes, saved.txBytes) }
             }
         }
         Engine.paused.value = false

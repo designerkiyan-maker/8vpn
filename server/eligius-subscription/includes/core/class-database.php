@@ -87,6 +87,11 @@ class Class_Database {
         // P9.2 migration: used_bytes quota accounting on wp_eligius_licenses.
         self::migrate_licenses_used_bytes();
 
+        // P9.2.1 migration: per-subscription-period usage stats (the Account
+        // usage card resets on a new purchase because a fresh license row
+        // starts at zero).
+        self::migrate_licenses_period_stats();
+
         return true;
     }
 
@@ -152,6 +157,35 @@ class Class_Database {
             ADD COLUMN `used_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `previous_license_id`");
         if ('' !== $wpdb->last_error) {
             error_log('eligius-subscription: failed to add used_bytes to ' . $table . ': ' . $wpdb->last_error);
+        }
+    }
+
+    /**
+     * P9.2.1 migration: per-subscription-period usage stats on
+     * wp_eligius_licenses (rx/tx/duration/sessions). A fresh purchase creates
+     * a fresh row → the Account usage card resets to zero automatically.
+     * Versioned — idempotent via column_exists checks (doc 02 §5.2).
+     */
+    private static function migrate_licenses_period_stats() {
+        global $wpdb;
+        $table = $wpdb->prefix . 'eligius_licenses';
+        foreach (array(
+            'used_rx_bytes'    => "ADD COLUMN `used_rx_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `used_bytes`",
+            'used_tx_bytes'    => "ADD COLUMN `used_tx_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `used_rx_bytes`",
+            'used_duration_ms' => "ADD COLUMN `used_duration_ms` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `used_tx_bytes`",
+            'used_sessions'    => "ADD COLUMN `used_sessions` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `used_duration_ms`",
+        ) as $column => $ddl) {
+            $exists = $wpdb->get_results(
+                "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'",
+                ARRAY_A
+            );
+            if ('' !== $wpdb->last_error || !empty($exists)) {
+                continue; // already migrated
+            }
+            $wpdb->query("ALTER TABLE `{$table}` {$ddl}");
+            if ('' !== $wpdb->last_error) {
+                error_log('eligius-subscription: failed to add ' . $column . ' to ' . $table . ': ' . $wpdb->last_error);
+            }
         }
     }
 

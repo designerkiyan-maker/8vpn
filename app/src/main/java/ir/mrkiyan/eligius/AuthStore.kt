@@ -135,7 +135,7 @@ object AuthStore {
     suspend fun fetchUsage(): Result<UsageServer> = withContext(Dispatchers.IO) {
         runCatching {
             val token = flow.value?.token ?: error("no JWT session")
-            val con = (URL("$WP_BASE/wp-json/eligius/v1/usage").openConnection() as HttpURLConnection).apply {
+            val con = (URL("$WP_BASE/wp-json/eligius/v1/licenses/usage").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Authorization", "Bearer $token")
                 setRequestProperty("User-Agent", "eligius-android")
@@ -145,11 +145,15 @@ object AuthStore {
             try {
                 if (con.responseCode != 200) error("HTTP ${con.responseCode}")
                 val j = JSONObject(con.inputStream.bufferedReader().use { it.readText() })
+                val d = j.optJSONObject("data") ?: JSONObject()
+                // P9.2.1: PER-SUBSCRIPTION-PERIOD stats (owner decision) — a
+                // fresh purchase row starts at zero, so the Account usage card
+                // resets when the user buys a plan. Server is authoritative.
                 UsageServer(
-                    rxBytes = j.optLong("rx_bytes"),
-                    txBytes = j.optLong("tx_bytes"),
-                    durationMs = j.optLong("duration_ms"),
-                    sessions = j.optInt("sessions"),
+                    rxBytes = d.optLong("used_rx_bytes"),
+                    txBytes = d.optLong("used_tx_bytes"),
+                    durationMs = d.optLong("used_duration_ms"),
+                    sessions = d.optInt("used_sessions"),
                 ).also { usageServer.value = it }
             } finally {
                 con.disconnect()
@@ -163,11 +167,12 @@ object AuthStore {
             runCatching {
                 val token = flow.value?.token ?: error("no JWT session")
                 val payload = JSONObject()
-                    .put("rx", rx.coerceAtLeast(0))
-                    .put("tx", tx.coerceAtLeast(0))
-                    .put("duration", durationMs.coerceAtLeast(0))
+                    .put("rx_bytes", rx.coerceAtLeast(0))
+                    .put("tx_bytes", tx.coerceAtLeast(0))
+                    .put("duration_ms", durationMs.coerceAtLeast(0))
+                    .put("sessions", 1)
                     .toString()
-                val con = (URL("$WP_BASE/wp-json/eligius/v1/usage").openConnection() as HttpURLConnection).apply {
+                val con = (URL("$WP_BASE/wp-json/eligius/v1/licenses/usage").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
                     setRequestProperty("Authorization", "Bearer $token")
@@ -185,42 +190,15 @@ object AuthStore {
                     if (code != 200) {
                         throw AuthException(j.optString("message").takeIf { it.isNotEmpty() })
                     }
+                    // P9.2.1: PER-SUBSCRIPTION-PERIOD stats (owner decision —
+                    // resets on a new purchase; server row starts at zero).
+                    val d = j.optJSONObject("data") ?: JSONObject()
                     UsageServer(
-                        rxBytes = j.optLong("rx_bytes"),
-                        txBytes = j.optLong("tx_bytes"),
-                        durationMs = j.optLong("duration_ms"),
-                        sessions = j.optInt("sessions"),
+                        rxBytes = d.optLong("used_rx_bytes"),
+                        txBytes = d.optLong("used_tx_bytes"),
+                        durationMs = d.optLong("used_duration_ms"),
+                        sessions = d.optInt("used_sessions"),
                     ).also { usageServer.value = it }
-                } finally {
-                    con.disconnect()
-                }
-            }
-        }
-
-    /** P9.2: reports the session's rx+tx deltas to the quota accountant
-     *  (POST /licenses/usage — monotonic used_bytes on the current license).
-     *  Best effort like the lifetime report; the server attributes the delta
-     *  when the account still holds an ACTIVE/TRIAL license. */
-    suspend fun reportLicenseUsage(rxBytes: Long, txBytes: Long): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val token = flow.value?.token ?: error("no JWT session")
-                val payload = JSONObject()
-                    .put("rx_bytes", rxBytes.coerceAtLeast(0))
-                    .put("tx_bytes", txBytes.coerceAtLeast(0))
-                    .toString()
-                val con = (URL("$WP_BASE/wp-json/eligius/v1/licenses/usage").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    setRequestProperty("Authorization", "Bearer $token")
-                    setRequestProperty("Content-Type", "application/json")
-                    setRequestProperty("User-Agent", "eligius-android")
-                    connectTimeout = 10_000
-                    readTimeout = 15_000
-                }
-                try {
-                    con.outputStream.use { it.write(payload.toByteArray()) }
-                    if (con.responseCode !in 200..299) error("HTTP ${con.responseCode}")
                 } finally {
                     con.disconnect()
                 }
@@ -438,6 +416,11 @@ object AuthStore {
                 token = token,
                 exp = (System.currentTimeMillis() / 1000) + 14 * 24 * 3600L
             ).also {
+                // Owner bug report (v1.3.13 live test): the session was
+                // persisted but flow was never emitted → the router stayed on
+                // AUTH until an app restart. Publishing the session here is
+                // what flips the router to Home (MainActivity LaunchedEffect).
+                flow.value = it
                 prefs?.edit()
                     ?.putString("user", it.user)
                     ?.putString("username", it.username)
@@ -489,6 +472,7 @@ object AuthStore {
                 token = null,
                 exp = (System.currentTimeMillis() / 1000) + 14 * 24 * 3600L
             ).also {
+                flow.value = it   // same router-flip fix as jwtLogin
                 prefs?.edit()
                     ?.putString("user", user)
                     ?.putString("username", user)
